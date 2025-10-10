@@ -86,7 +86,11 @@ The training takes about 80 minutes per scene on a single NVIDIA A100 GPU.
 The trained models and results are saved in `exp/mvscps`.
 
 ## Acknowledgements
-We thank the open-source project [instant-nsr-pl](https://github.com/bennyguo/instant-nsr-pl).
+We thank the open-source project [instant-nsr-pl](https://github.com/bennyguo/instant-nsr-pl), distributed under the MIT license. 
+
+```
+Copyright (c) 2022 Yuanchen Guo
+```
 
 ## License
 This project is licensed under the [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/) license.
