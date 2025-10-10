@@ -44,6 +44,15 @@ Python: 3.9.23
 [OK] nerfacc CUDA extension import: nerfacc.cuda
 [OK] tinycudann forward OK on cuda: output shape (128, 16)
 ```
+
+If you are using Docker, including the following lines in your Dockerfile should be sufficient:
+```Dockerfile
+FROM --platform=linux/amd64 docker.io/nvidia/cuda:11.8.0-cudnn8-devel-ubuntu22.04
+
+# Install dependencies
+RUN apt-get update && apt-get -y install python3-pip vim cmake openssh-server build-essential htop nvtop git wget curl unzip zip bash-completion sudo libgl1-mesa-glx xvfb rsync tmux libglib2.0-0 libbz2-dev ffmpeg libsm6 libxext6 && \
+    ln -s /usr/bin/python3 /usr/bin/python
+```
 ### Data Preparation
 
 Download and preprocess [DiLiGenT-MV](https://sites.google.com/site/photometricstereodata/mv) dataset (~7GB):
