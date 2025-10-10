@@ -1,0 +1,43 @@
+# ---- PyTorch (CUDA 11.8 build) ----
+# When using uv/pip you must specify the index-url, for example:
+# uv pip install -r requirements.txt --index-url https://download.pytorch.org/whl/cu118
+torch==2.5.1
+torchvision==0.20.1
+torchaudio==2.5.1
+
+# ---- Source packages from GitHub ----
+git+https://github.com/NVlabs/tiny-cuda-nn@2ec562e853e6f482b5d09168705205f46358fb39#subdirectory=bindings/torch
+git+https://github.com/KAIR-BAIR/nerfacc.git@v0.3.3
+
+# ---- Training framework and configuration ----
+pytorch-lightning==1.9.5
+hydra-core==1.3.2
+omegaconf==2.3.0
+
+# ---- Visualization / Scientific computing ----
+pyvista==0.37.0
+vtk<9.3
+icecream==2.1.3
+matplotlib==3.8.4
+open3d==0.17
+opencv-python==4.8.1.78
+imageio==2.34.1
+imageio-ffmpeg==0.4.9
+scipy==1.10.1
+PyMCubes==0.1.4
+pyransac3d==0.6.0
+torch_efficient_distloss==0.1.3
+tensorboard==2.17.1
+pyexr==0.3.10
+wandb==0.17.8
+rawpy==0.19.0
+libigl==2.4.1
+scikit-image==0.21.0
+lpips==0.1.4
+trimesh==4.3.2
+umap-learn==0.5.6
+gdown==5.1.0
+huggingface_hub==0.35.3
+
+# ---- Embree backend (prefer this over pyembree) ----
+embreex==2.17.7.post6
