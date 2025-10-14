@@ -16,6 +16,16 @@
       <img src='https://img.shields.io/badge/Youtube-Video-981E32?style=for-the-badge&Color=B31B1B' alt='video'>
     </a>
 
+## Overview
+<div align="center">
+<img src="./media/teaser.png" alt="Teaser" width="100%">
+</div>
+
+MVSCPS jointly recovers geometry, reflectance, and lighting from multi-view one-light-at-a-time (OLAT) images, featuring:
+- No light calibration required
+- Single-stage end-to-end optimation; thereby no intermediate photometric stereo algorithm required
+- Flexible camera-light configurations. In the extreme case, camera and light source can move independently for each shot.
+
 ## Getting Started
 
 ### Environment Setup
@@ -94,6 +104,11 @@ This script trains MVSCPS on all 6 scenes in our self-collected dataset sequenti
 The training takes about 80 minutes per scene on a single NVIDIA A100 GPU.
 The trained models and results are saved in `exp/mvscps`.
 
+### Tips
+- **Coordinate system.** We follow the OpenCV convention: x → right, y → down, z → forward.
+- **Controlling train/val/test subsets.** We use a plain-text index file to specify which image subsets are used for training/validation/testing. Sample files are provided under `configs/view_light_indices`. You can prepare your own file and set `dataset.train.view_light_index_fname` and `dataset.train.view_light_index_file` in the config file.
+- **Using your own data.** Please refer to the folder structure in our [HuggingFace Dataset](https://huggingface.co/datasets/cyberagent/mvscps) and the preprocessing script `data/preprocess_data_mvscps.py`. After your data is prepared, implement your custom image loader in `dataloader/load_fn`, then configure `dataset.img_load_fn`, `dataset.img_ext`, and `dataset.img_dirname` in `configs/conf/mvscps.yaml`. This config file should be fine for your custom data.
+- **RAW size mismatch & cropping.** When loading RAW images with [RawPy](https://pypi.org/project/rawpy/), the resulting image can be slightly larger than the size recorded in EXIF. For this reason our loader applies a small crop ([code reference](https://github.com/CyberAgentAILab/MVSCPS/blob/91f847795adcb8ab8400c77583d3663716bd937d/dataloader/load_fn.py#L37)). Note that the required crop region varies by camera vendor (we confirmed differences between Sony and Canon). A practical way to determine the correct crop for your camera is to compare the RAW-rendered image with its in-camera JPEG (e.g., visualize their difference) and adjust the crop until edge discrepancies disappear.
 ## Acknowledgements
 We thank the open-source project [instant-nsr-pl](https://github.com/bennyguo/instant-nsr-pl), distributed under the MIT license. 
 

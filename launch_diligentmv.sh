@@ -12,7 +12,7 @@ export PL_WEIGHTS_ONLY=0
 export WANDB_MODE=disabled
 
 # --- Experiment knobs ---
-NUM_LIGHT_LIST=(32)
+NUM_LIGHT_LIST=(4)
 OBJ_NAME_LIST=("buddha" "reading" "cow" "pot2" "bear")
 
 # to reproduce geometry evaluation results, uncomment the following line.
@@ -26,6 +26,7 @@ for obj_name in "${OBJ_NAME_LIST[@]}"; do
     echo "Running: object=${obj_name}, lights=${num_lights}"
     python launch.py +conf=diligentmv \
       conf.dataset.obj_name="${obj_name}" \
-      conf.dataset.train.view_light_index_fname=view_20_light_${num_lights}
+      conf.dataset.train.view_light_index_fname=view_20_light_${num_lights} \
+      conf.dataset.val.view_light_index_fname=view_20_light_${num_lights}
   done
 done
