@@ -23,8 +23,8 @@
 
 MVSCPS jointly recovers geometry, reflectance, and lighting from multi-view one-light-at-a-time (OLAT) images, featuring:
 - No light calibration required
-- Single-stage end-to-end optimation; thereby no intermediate photometric stereo algorithm required
-- Flexible camera-light configurations. In the extreme case, camera and light source can move independently for each shot.
+- Single-stage, end-to-end optimization; thereby no intermediate photometric stereo step
+- Flexible camera-light configurations. In the extreme case, the camera and light source can move independently for each shot.
 
 ## Getting Started
 
