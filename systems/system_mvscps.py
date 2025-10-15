@@ -641,17 +641,24 @@ class MvscpsSystem(pl.LightningModule, SaverMixin):
             mesh_err = pv.read(err_mesh_path)
 
         print("Drawing the mesh from training views ...")
+        try:
+            img_h = self.dataset.img_h_mesh
+            img_w = self.dataset.img_w_mesh
+        except:
+            img_h = self.dataset.img_h
+            img_w = self.dataset.img_w
+
         for pose_id, c2w in tqdm(enumerate(self.dataset.C2W_val_mesh)):
             fy = self.dataset.K_val_mesh[pose_id][1, 1]
             mesh_fpath = os.path.join(mesh_draw_dir, f"{pose_id:02d}_eval.png")
 
-            self.draw_mesh(mesh, c2w, fy, self.dataset.img_h, self.dataset.img_w, mesh_fpath)
+            self.draw_mesh(mesh, c2w, fy, img_h, img_w, mesh_fpath)
             if self.dataset.gt_mesh_fpath is not None:
                 mesh_gt_fpath = os.path.join(mesh_draw_dir, f"{pose_id:02d}_gt.png")
-                self.draw_mesh(mesh_gt, c2w, fy, self.dataset.img_h, self.dataset.img_w, mesh_gt_fpath)
+                self.draw_mesh(mesh_gt, c2w, fy, img_h, img_w, mesh_gt_fpath)
 
                 mesh_err_fpath = os.path.join(mesh_draw_dir, f"{pose_id:02d}_err.png")
-                self.draw_mesh(mesh_err, c2w, fy, self.dataset.img_h, self.dataset.img_w, mesh_err_fpath, set_rgb=True)
+                self.draw_mesh(mesh_err, c2w, fy, img_h, img_w, mesh_err_fpath, set_rgb=True)
 
         print("Drawing the mesh from training views done.")
         if self.dataset.gt_mesh_fpath is not None:

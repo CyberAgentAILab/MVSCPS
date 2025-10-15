@@ -12,7 +12,7 @@ export PL_WEIGHTS_ONLY=0
 export WANDB_MODE=disabled
 
 # --- Experiment knobs ---
-NUM_LIGHT_LIST=(4)
+NUM_LIGHT_LIST=(32)
 OBJ_NAME_LIST=("buddha" "reading" "cow" "pot2" "bear")
 
 # to reproduce geometry evaluation results, uncomment the following line.

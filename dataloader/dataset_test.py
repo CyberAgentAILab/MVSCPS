@@ -40,6 +40,8 @@ class DiligentTestDataset(Dataset):
         self.img_h0, self.img_w0 = self.img_load_fn(sample_img_path).shape[:2]
         self.img_h = int(self.img_h0 / cfg_test.img_downscale)
         self.img_w = int(self.img_w0 / cfg_test.img_downscale)
+        self.img_h_mesh = int(self.img_h0 / cfg_test.img_mesh_downscale)
+        self.img_w_mesh = int(self.img_w0 / cfg_test.img_mesh_downscale)
 
         self.has_mask = True
 
