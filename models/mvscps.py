@@ -317,34 +317,43 @@ class NeuSModel(nn.Module):
         _, surface_grad, surface_features = self.geometry(surface_points, with_grad=True, with_feature=True)  # (N_rays, 3), (N_rays, 3), (N_rays, 3)
         surface_normal = Fn.normalize(surface_grad, p=2, dim=-1)
 
-        n_brdf_samples = brdf_sphere_fg_mask.sum()
+        valid_features = surface_features[rays_valid]  # (M, feature_dim)
+        n_spheres = valid_features.shape[0]
+
+        # The sphere-normal samples and the (camera-space) view/light directions are
+        # identical for every surface point -- only the per-point latent feature
+        # changes -- so build them once instead of per iteration.
         brdf_sphere_fg_mask_flat = brdf_sphere_fg_mask.reshape(-1).bool()
-        brdf_sphere_normal_flat = brdf_sphere_normal.reshape(-1, 3)
-        normal_camera_sphere_input = brdf_sphere_normal_flat[brdf_sphere_fg_mask_flat] # (N_samples, 3)
         normal_sphere_res = brdf_sphere_normal.shape[0]
+        normal_camera_sphere_input = brdf_sphere_normal.reshape(-1, 3)[brdf_sphere_fg_mask_flat]  # (S, 3)
+        n_brdf_samples = normal_camera_sphere_input.shape[0]
+        t_dirs_brdf = torch.tensor([0., 0., -1.], device=surface_points.device).expand(n_brdf_samples, 3)
+        light_dir_brdf = Fn.normalize(light_dir.expand(n_brdf_samples, 3), p=2, dim=-1)
 
-        brdf_sphere_list = []
-        for i in tqdm(range(rays_valid.sum())):
-            surface_point_feature = surface_features[rays_valid][i] # (3, )
-
-            # repeat the surface point and feature to the number of brdf samples
-            surface_point_feature = surface_point_feature.expand(n_brdf_samples, -1)
-            t_dirs_brdf = torch.tensor([0., 0., -1.], device=surface_points.device).expand(n_brdf_samples, 3)
-            light_dir_brdf = light_dir.expand(n_brdf_samples, 3)
-            light_dir_brdf = Fn.normalize(light_dir_brdf, p=2, dim=-1)
+        # Evaluate the BRDF for every surface point, batched over chunks of points
+        # (replaces the former per-point Python loop; numerically identical -- each
+        # sphere is still normalised by its own max). chunk bounds peak memory.
+        sphere_chunk = 256
+        brdf_sphere_all = torch.zeros((n_spheres, normal_sphere_res * normal_sphere_res, 3),
+                                      device=surface_features.device)
+        for start in tqdm(range(0, n_spheres, sphere_chunk)):
+            feats = valid_features[start:start + sphere_chunk]  # (B, feature_dim)
+            b = feats.shape[0]
+            feats_rep = feats[:, None, :].expand(b, n_brdf_samples, -1).reshape(b * n_brdf_samples, -1)
+            normals_rep = normal_camera_sphere_input[None].expand(b, n_brdf_samples, 3).reshape(b * n_brdf_samples, 3)
+            t_dirs_rep = t_dirs_brdf[None].expand(b, n_brdf_samples, 3).reshape(b * n_brdf_samples, 3)
+            light_rep = light_dir_brdf[None].expand(b, n_brdf_samples, 3).reshape(b * n_brdf_samples, 3)
 
             # all vectors in camera space, since angular encoding is used
-            brdf_values = self.brdf(surface_point_feature, normal_camera_sphere_input, t_dirs_brdf, light_dir_brdf)  # (N_samples, 3)
-            brdf_values = brdf_values/ brdf_values.max()
-            brdf_values= torch.pow(brdf_values, 1/2.2)
+            brdf_values = self.brdf(feats_rep, normals_rep, t_dirs_rep, light_rep).reshape(b, n_brdf_samples, 3)
+            brdf_values = brdf_values / brdf_values.amax(dim=(1, 2), keepdim=True)  # per-sphere max
+            brdf_values = torch.pow(brdf_values, 1 / 2.2)
 
-            # save the brdf values as image
-            brdf_sphere = torch.zeros((normal_sphere_res * normal_sphere_res, 3)).to(brdf_values.device)
-            brdf_sphere[brdf_sphere_fg_mask_flat] = brdf_values
-            brdf_sphere = brdf_sphere.reshape(normal_sphere_res, normal_sphere_res, 3)
-            brdf_sphere_list.append(brdf_sphere)
+            chunk_spheres = torch.zeros((b, normal_sphere_res * normal_sphere_res, 3), device=brdf_values.device)
+            chunk_spheres[:, brdf_sphere_fg_mask_flat] = brdf_values
+            brdf_sphere_all[start:start + sphere_chunk] = chunk_spheres
 
-        brdf_sphere_all = torch.stack(brdf_sphere_list, dim=0)  # (N_rays_valid, H, W, 3)
+        brdf_sphere_all = brdf_sphere_all.reshape(n_spheres, normal_sphere_res, normal_sphere_res, 3)  # (N_rays_valid, H, W, 3)
         out = {"rays_surface_latent": surface_features,
                "rays_brdf_sphere": brdf_sphere_all,
                "rays_surface_normal": surface_normal,
