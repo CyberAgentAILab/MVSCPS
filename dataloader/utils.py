@@ -5,6 +5,16 @@ import open3d as o3d
 import torch
 
 
+def parse_view_idx(view_light_index):
+    """View index from a 'V<vv>L<ll>' string, e.g. 'V03L12' -> 3."""
+    return int(view_light_index.split("V")[1].split("L")[0])
+
+
+def parse_light_idx(view_light_index):
+    """Light index from a 'V<vv>L<ll>' string, e.g. 'V03L12' -> 12."""
+    return int(view_light_index.split("L")[-1])
+
+
 def get_camera_space_ray_directions(img_height,
                                     img_width,
                                     K,
@@ -140,7 +150,6 @@ def visualize_camera_poses(C2W_list, img_list=None, K=None):
             H, W = img.shape[:2]
             xx, yy = np.meshgrid(range(W), range(H))
             yy = np.flip(yy, axis=0)
-            # ic(xx, yy)
 
             u = np.zeros((H, W, 3))
             u[..., 0] = xx

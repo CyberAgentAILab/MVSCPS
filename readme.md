@@ -40,7 +40,7 @@ What this installs
 - **PyTorch 2.5.1**, **torchvision 0.20.1** (CUDA **11.8** wheels)
 - Source-built extensions: **tiny-cuda-nn** (Torch bindings) and **nerfacc**
 - Training/config stack: **pytorch-lightning 1.9.5**, **hydra-core**, **omegaconf**
-- Visualization & scientific libs: **matplotlib**, **pyvista**, **open3d**, **opencv-python**, **imageio[ffmpeg]**, **scipy**, **scikit-image**, **trimesh**, **lpips**, **tensorboard**, **wandb**, **huggingface_hub**, etc.
+- Visualization & scientific libs: **matplotlib**, **pyvista**, **open3d**, **opencv-python**, **imageio[ffmpeg]**, **scipy**, **scikit-image**, **trimesh**, **lpips**, **tensorboard**, **huggingface_hub**, etc.
 
 
 After successfully setting up the environment, you should see the following output:

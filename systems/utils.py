@@ -25,27 +25,6 @@ def crop_mask(mask):
     bbox = diff.getbbox()
     return bbox
 
-def crop_a_set_of_images(*image_path):
-    from PIL import Image, ImageChops
-    imgs = []
-    bboxes = []
-    for im_path in image_path:
-        im = Image.open(im_path)
-        bg = Image.new(im.mode, im.size, im.getpixel((0, 0)))
-        diff = ImageChops.difference(im, bg)
-        diff = ImageChops.add(diff, diff, 2.0, -5)
-        bbox = diff.getbbox()
-
-        imgs.append(im)
-        bboxes.append(bbox)
-    bbox_aggre = np.asarray(bboxes)
-    bbox_min = np.min(bbox_aggre, 0)
-    bbox_max = np.max(bbox_aggre, 0)
-    bbox_common = (bbox_min[0], bbox_min[1], bbox_max[2], bbox_max[3])
-    for idx, img in enumerate(imgs):
-        img = img.crop(bbox_common)
-        img.save(image_path[idx])
-
 def crop_image_by_mask(img, mask, boarder=0, fill_background=True):
     if fill_background:
         if img.max() > 1.:
@@ -60,19 +39,6 @@ def crop_image_by_mask(img, mask, boarder=0, fill_background=True):
     except:
         crop_img = img.copy()
     return crop_img
-
-
-def apply_jet_on_error_maps(err_maps, cb_up=1):
-    err_jets = []
-    for err_map in err_maps:
-        err_map = err_map / cb_up  # 10mm
-        err_map[err_map > 1] = 1
-        nan_mask = np.isnan(err_map)
-        err_map[nan_mask] = 1
-        err_jet = cv2.applyColorMap((255 * err_map).astype(np.uint8), cv2.COLORMAP_JET)
-        err_jet[nan_mask] = 255
-        err_jets.append(err_jet)
-    return err_jets
 
 
 class ChainedScheduler(lr_scheduler._LRScheduler):
@@ -364,7 +330,6 @@ def get_scheduler(name):
 
 def getattr_recursive(m, attr):
     for name in attr.split('.'):
-        print(name)
         m = getattr(m, name)
     return m
 
@@ -376,7 +341,6 @@ def get_parameters(model, name):
     elif isinstance(module, nn.Parameter):
         return module
     elif isinstance(module, (list, tuple)):
-        # print([isinstance(m, nn.Module) for m in module])
         return [m.parameters() for m in module]
     return []
 
@@ -388,7 +352,6 @@ def parse_optimizer(config, model):
             param = get_parameters(model, name)
             if isinstance(param, (list, tuple)):
                 for idx, m in enumerate(param):
-                    # ic(m.device)
                     params.append({'params': m, "name": f"{name}_{idx}", **args})
             else:
                 params.append({'params': param, "name": name, **args})

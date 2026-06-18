@@ -1,3 +1,4 @@
+import json
 import os
 
 import cv2
@@ -22,7 +23,7 @@ from tqdm import tqdm
 
 from core.registry import REG
 from models.utils import chunk_batch
-from systems.criterions import (MAE, binary_cross_entropy,
+from systems.criterions import (AngularError, binary_cross_entropy,
                                 chamfer_distance_and_f1_score,
                                 scale_invariant_mse)
 from systems.utils import parse_optimizer, parse_scheduler, update_module_step
@@ -71,7 +72,7 @@ class MvscpsSystem(pl.LightningModule, SaverMixin):
             })
         return ret
 
-    def C(self, value):
+    def schedule_value(self, value):
         if isinstance(value, int) or isinstance(value, float):
             pass
         else:
@@ -95,10 +96,10 @@ class MvscpsSystem(pl.LightningModule, SaverMixin):
     def prepare(self):
         self.criterions = {
             'psnr': PSNR(data_range=1.).to(self.rank),
-            'mae': MAE(),  # mean angular error for normal map and light directions
+            'angular_error': AngularError(),  # mean angular error for normal map and light directions
             'ssim': SSIM().to(self.rank),
             'lpips': LPIPS(normalize=True).to(self.rank),
-            "simse": scale_invariant_mse,
+            "scale_invariant_mse": scale_invariant_mse,
         }
         self.train_num_samples = self.config.model.train_num_rays * (self.config.model.num_samples_per_ray + self.config.model.get('num_samples_per_ray_bg', 0))
         self.train_num_rays = self.config.model.train_num_rays
@@ -133,39 +134,39 @@ class MvscpsSystem(pl.LightningModule, SaverMixin):
             loss_rgb_weighted_l1 = F.l1_loss(render_out['rays_rgb'][render_out['rays_valid'][..., 0]] / rgb_scale_est,
                                               batch['rays_rgb'][render_out['rays_valid'][..., 0]] / rgb_scale_est)
             self.log('train/loss_rgb_weighted_l1', round(loss_rgb_weighted_l1.item(), 4), prog_bar=True)
-            loss += loss_rgb_weighted_l1 * self.C(self.config.system.loss.lambda_rgb_weighted_l1)
+            loss += loss_rgb_weighted_l1 * self.schedule_value(self.config.system.loss.lambda_rgb_weighted_l1)
 
         if self.config.system.loss.lambda_rgb_weighted_mse > 0:
             loss_rgb_weighted_mse = F.mse_loss(render_out['rays_rgb'][render_out['rays_valid'][..., 0]] / rgb_scale_est,
                                                 batch['rays_rgb'][render_out['rays_valid'][..., 0]] / rgb_scale_est)
             self.log('train/loss_rgb_weighted_mse', loss_rgb_weighted_mse.mean(), prog_bar=True)
-            loss += loss_rgb_weighted_mse * self.C(self.config.system.loss.lambda_rgb_weighted_mse)
+            loss += loss_rgb_weighted_mse * self.schedule_value(self.config.system.loss.lambda_rgb_weighted_mse)
 
         if self.config.system.loss.lambda_rgb_mse > 0:
             loss_rgb_mse = F.mse_loss(render_out['rays_rgb'][render_out['rays_valid'][..., 0]],
                                        batch['rays_rgb'][render_out['rays_valid'][..., 0]])
             self.log('train/loss_rgb_mse', loss_rgb_mse.mean(), prog_bar=True)
-            loss += loss_rgb_mse * self.C(self.config.system.loss.lambda_rgb_mse)
+            loss += loss_rgb_mse * self.schedule_value(self.config.system.loss.lambda_rgb_mse)
 
         if self.config.system.loss.lambda_rgb_l1 > 0:
             loss_rgb_l1 = F.l1_loss(render_out['rays_rgb'][render_out['rays_valid'][...,0]], batch['rays_rgb'][render_out['rays_valid'][...,0]])
             self.log('train/loss_rgb_l1', round(loss_rgb_l1.item(), 4), prog_bar=True)
-            loss += loss_rgb_l1 * self.C(self.config.system.loss.lambda_rgb_l1)
+            loss += loss_rgb_l1 * self.schedule_value(self.config.system.loss.lambda_rgb_l1)
 
         loss_eikonal = ((torch.linalg.norm(render_out['samples_sdf_grad'], ord=2, dim=-1) - 1.)**2).mean()
         self.log('train/loss_eikonal', round(loss_eikonal.item(), 4), prog_bar=True)
-        loss += loss_eikonal * self.C(self.config.system.loss.lambda_eikonal)
+        loss += loss_eikonal * self.schedule_value(self.config.system.loss.lambda_eikonal)
 
         opacity = torch.clamp(render_out['rays_opacity'].squeeze(-1), 1.e-3, 1.- 1.e-3)
         loss_mask = binary_cross_entropy(opacity, batch['rays_fg_mask'].float())
         self.log('train/loss_mask', round(loss_mask.item(), 4), prog_bar=True)
-        loss += loss_mask * (self.C(self.config.system.loss.lambda_mask) if self.dataset.has_mask else 0.0)
+        loss += loss_mask * (self.schedule_value(self.config.system.loss.lambda_mask) if self.dataset.has_mask else 0.0)
 
         self.log('train/inv_s', round(self.model.variance.inv_s.item(), 3), prog_bar=True)
 
         for name, value in self.config.system.loss.items():
             if name.startswith('lambda'):
-                self.log(f'train_params/{name}', self.C(value))
+                self.log(f'train_params/{name}', self.schedule_value(value))
 
         self.log('train/num_rays', float(self.train_num_rays), prog_bar=True)
         self.log('train/samples_per_ray', render_out['num_samples']/self.train_num_rays, prog_bar=True)
@@ -181,7 +182,7 @@ class MvscpsSystem(pl.LightningModule, SaverMixin):
             normal_gt = F.normalize(normal_gt, p=2, dim=-1)
             normal_angular_err_degree = torch.acos(torch.clamp(torch.sum(normal_est * normal_gt, dim=-1), -1.0, 1.0))
             normal_angular_err = torch.rad2deg(normal_angular_err_degree).mean()
-            self.log('test/mae_normal', round(normal_angular_err.item(), 2), prog_bar=True)
+            self.log('train/mae_normal', round(normal_angular_err.item(), 2), prog_bar=True)
 
         # if dataset has gt light directions, evaluate the light directions
         if self.dataset.light_dirs_GT is not None:
@@ -193,7 +194,7 @@ class MvscpsSystem(pl.LightningModule, SaverMixin):
             light_est = light_est.reshape(-1, 3)
             light_gt = light_gt.reshape(-1, 3)
             light_angular_err = np.mean(np.arccos(np.clip(np.sum(light_est * light_gt, axis=-1), -1, 1)) * 180 / np.pi)
-            self.log('test/mae_light', round(light_angular_err.item(), 2), prog_bar=True)
+            self.log('train/mae_light', round(light_angular_err.item(), 2), prog_bar=True)
 
         return {
             'loss': loss
@@ -202,6 +203,68 @@ class MvscpsSystem(pl.LightningModule, SaverMixin):
     def on_validation_batch_start(self, batch, batch_idx, dataloader_idx):
         self.dataset = self.trainer.datamodule.val_dataloader().dataset
         update_module_step(self.model, self.current_epoch, self.global_step)
+
+    def _eval_rgb_metrics(self, rgb_render, rgb_gt, fg_mask):
+        """psnr/ssim/lpips for a rendered vs GT image. Shared by val/test steps."""
+        rgb_render_eval = set_image_background_black(rgb_render, fg_mask).permute(2, 0, 1).unsqueeze(0)  # (1, 3, H, W)
+        rgb_gt_eval = set_image_background_black(rgb_gt, fg_mask).permute(2, 0, 1).unsqueeze(0)  # (1, 3, H, W)
+
+        psnr = self.criterions['psnr'](rgb_render[fg_mask], rgb_gt[fg_mask])  # We calculate psnr only for foreground pixels.
+        ssim = self.criterions['ssim'](rgb_render_eval, rgb_gt_eval)
+        lpips = self.criterions['lpips'](rgb_render_eval.clamp(0., 1.), rgb_gt_eval.clamp(0., 1.))
+        return psnr, ssim, lpips
+
+    def _eval_normal_map(self, out, batch, fg_mask):
+        """Estimated camera-space normal map and, if GT is available, the mae.
+        Returns (normal_map_est, normal_map_gt_or_None, mae_normal_or_None)."""
+        rays_normal_dir_camera_space = out['rays_normal_dir_world_space'].to(batch["R_w2c"]) @ batch['R_w2c'].T  # (N_rays, 3)
+        rays_normal_dir_camera_space = F.normalize(rays_normal_dir_camera_space, p=2, dim=-1)
+        rays_normal_dir_camera_space[..., [1, 2]] = -rays_normal_dir_camera_space[..., [1, 2]]  # opencv to opengl conver
+
+        normal_map_est_camera_space = rays_to_image(rays_normal_dir_camera_space, fg_mask)
+
+        normal_map_gt_camera_space, mae_normal = None, None
+        if self.dataset.has_gt_normal:
+            normal_map_gt_camera_space = batch['image_normal_camera_space']
+            normal_gt_norm = torch.linalg.norm(normal_map_gt_camera_space, dim=-1)
+            normal_gt_valid_mask = normal_gt_norm > 0.9
+
+            mae_normal, _normal_error_map = self.criterions['angular_error'](normal_map_est_camera_space, normal_map_gt_camera_space, valid_mask=normal_gt_valid_mask)
+        return normal_map_est_camera_space, normal_map_gt_camera_space, mae_normal
+
+    def _build_img_grids(self, normal_map_est, rgb_gt, rgb_render, rgb_wo_shadow, normal_map_gt):
+        """The [GT normal,] est normal, GT rgb, render, render-wo-shadow grid. Shared by val/test."""
+        img_grids = [
+            {'type': 'rgb', 'img': normal_map_est, 'kwargs': {'data_format': 'HWC', 'data_range': (-1, 1)}},
+            {'type': 'rgb', 'img': gamma_correct(rgb_gt), 'kwargs': {'data_format': 'HWC'}},
+            {'type': 'rgb', 'img': gamma_correct(rgb_render), 'kwargs': {'data_format': 'HWC'}},
+            {'type': 'rgb', 'img': gamma_correct(rgb_wo_shadow), 'kwargs': {'data_format': 'HWC'}}
+        ]
+        if normal_map_gt is not None:
+            img_grids.insert(0, {'type': 'rgb', 'img': normal_map_gt, 'kwargs': {'data_format': 'HWC', 'data_range': (-1, 1)}})
+        return img_grids
+
+    def _write_test_metric(self, metric_name, view_light_idx, view_light_type, value):
+        """Append one '<idx> <type>: <value>' line to the per-metric test txt file."""
+        fname = f"test_results/it{self.trained_global_step}/it{self.trained_global_step}_{metric_name}.txt"
+        with open(self.get_save_path(fname), "a") as f:
+            f.write(f"{view_light_idx} {view_light_type}: {value} \n")
+
+    def _write_metrics_summary(self, summary):
+        """Write the final test metrics as both machine-readable JSON and a
+        human-readable aligned table, under test_results/it<step>/."""
+        base = f"test_results/it{self.trained_global_step}/metrics_summary"
+        with open(self.get_save_path(base + ".json"), "w") as f:
+            json.dump(summary, f, indent=2)
+        units = {'mae_normal': ' deg', 'mae_light': ' deg'}
+        lines = [f"# metrics summary @ it{self.trained_global_step}",
+                 f"{'metric':<12}value"]
+        for k in ['psnr', 'ssim', 'lpips', 'mae_normal', 'mae_light', 'cd', 'fscore']:
+            v = summary.get(k)
+            if v is not None:
+                lines.append(f"{k:<12}{v:.4f}{units.get(k, '')}")
+        with open(self.get_save_path(base + ".txt"), "w") as f:
+            f.write("\n".join(lines) + "\n")
 
     def validation_step(self, batch, batch_idx, dataloader_idx=0):
         out = chunk_batch(self.model.forward, self.config.model.ray_chunk, True, batch["rays"])
@@ -213,45 +276,23 @@ class MvscpsSystem(pl.LightningModule, SaverMixin):
         rgb_wo_shadow = rays_to_image(out['rays_rgb_wo_shadow'], fg_mask)
         rgb_gt = batch['image_rgb']
 
-        rgb_render_eval = set_image_background_black(rgb_render, fg_mask).permute(2, 0, 1).unsqueeze(0)  # (1, 3, H, W)
-        rgb_gt_eval = set_image_background_black(rgb_gt, fg_mask).permute(2, 0, 1).unsqueeze(0)  # (1, 3, H, W)
-
-        psnr = self.criterions['psnr'](rgb_render[fg_mask], rgb_gt[fg_mask])  # We calculate psnr only for foreground pixels.
-        ssim = self.criterions['ssim'](rgb_render_eval, rgb_gt_eval)
-        lpips = self.criterions['lpips'](rgb_render_eval.clamp(0., 1.), rgb_gt_eval.clamp(0., 1.))
+        psnr, ssim, lpips = self._eval_rgb_metrics(rgb_render, rgb_gt, fg_mask)
         self.log('val/psnr', round(psnr.item(), 2), prog_bar=True, batch_size=1)
         self.log('val/ssim', round(ssim.item(), 2), prog_bar=True, batch_size=1)
         self.log('val/lpips', round(lpips.item(), 2), prog_bar=True, batch_size=1)
 
         # validate normal map
-        rays_normal_dir_camera_space = out['rays_normal_dir_world_space'].to(batch["R_w2c"]) @ batch['R_w2c'].T  # (N_rays, 3)
-        rays_normal_dir_camera_space = F.normalize(rays_normal_dir_camera_space, p=2, dim=-1)
-        rays_normal_dir_camera_space[..., [1, 2]] = -rays_normal_dir_camera_space[..., [1, 2]]  # opencv to opengl conver
-
-        normal_map_est_camera_space = rays_to_image(rays_normal_dir_camera_space, fg_mask)
-
-        if self.dataset.has_gt_normal:
-            normal_map_gt_camera_space = batch['image_normal_camera_space']
-            normal_gt_norm = torch.linalg.norm(normal_map_gt_camera_space, dim=-1)
-            normal_gt_valid_mask = normal_gt_norm > 0.9
-
-            mae_normal, normal_error_map = self.criterions['mae'](normal_map_est_camera_space, normal_map_gt_camera_space, valid_mask=normal_gt_valid_mask)
+        normal_map_est_camera_space, normal_map_gt_camera_space, mae_normal = self._eval_normal_map(out, batch, fg_mask)
+        if mae_normal is not None:
             self.log('val/mae_normal', mae_normal, prog_bar=True, batch_size=1)
 
         # save images
-        img_grids = [
-            {'type': 'rgb', 'img': normal_map_est_camera_space, 'kwargs': {'data_format': 'HWC', 'data_range': (-1, 1)}},
-            {'type': 'rgb', 'img': gamma_correct(rgb_gt), 'kwargs': {'data_format': 'HWC'}},
-            {'type': 'rgb', 'img': gamma_correct(rgb_render), 'kwargs': {'data_format': 'HWC'}},
-            {'type': 'rgb', 'img': gamma_correct(rgb_wo_shadow), 'kwargs': {'data_format': 'HWC'}}
-        ]
-        if self.dataset.has_gt_normal:
-            img_grids.insert(0, {'type': 'rgb', 'img': normal_map_gt_camera_space, 'kwargs': {'data_format': 'HWC', 'data_range': (-1, 1)}})
+        img_grids = self._build_img_grids(normal_map_est_camera_space, rgb_gt, rgb_render, rgb_wo_shadow, normal_map_gt_camera_space)
         view_light_idx = batch["val_view_light_idx"]
         self.save_image_grid(f"validation_results/img_normal/it{self.global_step}_{view_light_idx}.png", img_grids)
 
         # save a slice of the sdf field
-        sdf_plane = self.model.slice()
+        sdf_plane = self.model.slice_sdf_plane()
         plt.imshow(sdf_plane, cmap='jet')
         plt.colorbar()
         plt.contour(sdf_plane, levels=[0], colors='black')
@@ -271,9 +312,6 @@ class MvscpsSystem(pl.LightningModule, SaverMixin):
         # save light intensity and directions as txt file
         np.savetxt(self.get_save_path(f"validation_results/light/it{self.global_step}_light_intensity.txt"), light_intensity)
         np.savetxt(self.get_save_path(f"validation_results/light/it{self.global_step}_light_dir.txt"), light_dir_est)
-
-    def validation_epoch_end(self, outputs):
-        pass
 
     def on_test_batch_start(self, batch, batch_idx, dataloader_idx):
         self.dataset = self.trainer.datamodule.test_dataloader().dataset
@@ -299,46 +337,18 @@ class MvscpsSystem(pl.LightningModule, SaverMixin):
             rgb_render = rgb_render * light_intensity_scale
             rgb_wo_shadow = rgb_wo_shadow * light_intensity_scale
 
-        rgb_render_eval = set_image_background_black(rgb_render, fg_mask).permute(2, 0, 1).unsqueeze(0)  # (1, 3, H, W)
-        rgb_gt_eval = set_image_background_black(rgb_gt, fg_mask).permute(2, 0, 1).unsqueeze(0)  # (1, 3, H, W)
-
-        psnr = self.criterions['psnr'](rgb_render[fg_mask],
-                                       rgb_gt[fg_mask])  # We calculate psnr only for foreground pixels.
-        ssim = self.criterions['ssim'](rgb_render_eval, rgb_gt_eval)
-        lpips = self.criterions['lpips'](rgb_render_eval.clamp(0., 1.), rgb_gt_eval.clamp(0., 1.))
+        psnr, ssim, lpips = self._eval_rgb_metrics(rgb_render, rgb_gt, fg_mask)
         self.log('test/psnr', round(psnr.item(), 2), prog_bar=True, batch_size=1, on_step=True, on_epoch=True)
         self.log('test/ssim', round(ssim.item(), 2), prog_bar=True, batch_size=1, on_step=True, on_epoch=True)
         self.log('test/lpips', round(lpips.item(), 2), prog_bar=True, batch_size=1, on_step=True, on_epoch=True)
 
         # validate normal map
-        rays_normal_dir_camera_space = out['rays_normal_dir_world_space'].to(batch["R_w2c"]) @ batch[
-            'R_w2c'].T  # (N_rays, 3)
-        rays_normal_dir_camera_space = F.normalize(rays_normal_dir_camera_space, p=2, dim=-1)
-        rays_normal_dir_camera_space[..., [1, 2]] = -rays_normal_dir_camera_space[..., [1, 2]]  # opencv to opengl conver
-
-        normal_map_est_camera_space = rays_to_image(rays_normal_dir_camera_space, fg_mask)
-
-        if self.dataset.has_gt_normal:
-            normal_map_gt_camera_space = batch['image_normal_camera_space']
-            normal_gt_norm = torch.linalg.norm(normal_map_gt_camera_space, dim=-1)
-            normal_gt_valid_mask = normal_gt_norm > 0.9
-
-            mae_normal, normal_error_map = self.criterions['mae'](normal_map_est_camera_space,
-                                                                  normal_map_gt_camera_space,
-                                                                  valid_mask=normal_gt_valid_mask)
+        normal_map_est_camera_space, normal_map_gt_camera_space, mae_normal = self._eval_normal_map(out, batch, fg_mask)
+        if mae_normal is not None:
             self.log('test/mae_normal', mae_normal, prog_bar=True, batch_size=1, on_step=True, on_epoch=True)
 
         # save images
-        img_grids = [
-            {'type': 'rgb', 'img': normal_map_est_camera_space,
-             'kwargs': {'data_format': 'HWC', 'data_range': (-1, 1)}},
-            {'type': 'rgb', 'img': gamma_correct(rgb_gt), 'kwargs': {'data_format': 'HWC'}},
-            {'type': 'rgb', 'img': gamma_correct(rgb_render), 'kwargs': {'data_format': 'HWC'}},
-            {'type': 'rgb', 'img': gamma_correct(rgb_wo_shadow), 'kwargs': {'data_format': 'HWC'}}
-        ]
-        if self.dataset.has_gt_normal:
-            img_grids.insert(0, {'type': 'rgb', 'img': normal_map_gt_camera_space,
-                                 'kwargs': {'data_format': 'HWC', 'data_range': (-1, 1)}})
+        img_grids = self._build_img_grids(normal_map_est_camera_space, rgb_gt, rgb_render, rgb_wo_shadow, normal_map_gt_camera_space)
         view_light_idx = batch["view_light_idx"]
         self.save_image_grid(f"test_results/it{self.trained_global_step}/image_and_normal/it{self.trained_global_step}_{view_light_idx}.png", img_grids)
 
@@ -348,32 +358,11 @@ class MvscpsSystem(pl.LightningModule, SaverMixin):
         light_type = batch["light_type"]
         view_light_type = f"{view_type}_view_{light_type}_light"
 
-        # save psnr and mae to text file
-        fname = f"test_results/it{self.trained_global_step}/it{self.trained_global_step}_psnr.txt"
-        save_path = self.get_save_path(fname)
-        context = (f"{view_light_idx} {view_light_type}: {psnr} \n")
-        with open(save_path, "a") as f:
-            f.write(context)
-
-        ssim_txt = f"test_results/it{self.trained_global_step}/it{self.trained_global_step}_ssim.txt"
-        save_path = self.get_save_path(ssim_txt)
-        ssim_context = (f"{view_light_idx} {view_light_type}: {ssim} \n")
-        with open(save_path, "a") as f:
-            f.write(ssim_context)
-
-        lpips_txt = f"test_results/it{self.trained_global_step}/it{self.trained_global_step}_lpips.txt"
-        save_path = self.get_save_path(lpips_txt)
-        lpips_context = (f"{view_light_idx} {view_light_type}: {lpips} \n")
-        with open(save_path, "a") as f:
-            f.write(lpips_context)
-
-        # save normal mae
+        self._write_test_metric("psnr", view_light_idx, view_light_type, psnr)
+        self._write_test_metric("ssim", view_light_idx, view_light_type, ssim)
+        self._write_test_metric("lpips", view_light_idx, view_light_type, lpips)
         if self.dataset.has_gt_normal:
-            mae_normal_txt = f"test_results/it{self.trained_global_step}/it{self.trained_global_step}_mae_normal.txt"
-            save_path = self.get_save_path(mae_normal_txt)
-            mae_context = (f"{view_light_idx} {view_light_type}: {mae_normal} \n")
-            with open(save_path, "a") as f:
-                f.write(mae_context)
+            self._write_test_metric("mae_normal", view_light_idx, view_light_type, mae_normal)
 
         return_out = {
             'index': batch_idx,
@@ -423,7 +412,7 @@ class MvscpsSystem(pl.LightningModule, SaverMixin):
         light_intensity = self.model.lighting.intensity[self.model.lighting.train_light_indices].detach().cpu().numpy()
         if self.dataset.light_intensity_GT is not None:
             light_intensity_gt = self.dataset.light_intensity_GT[self.model.lighting.train_light_indices]
-            simse, mse_individual = self.criterions['simse'](
+            simse, mse_individual = self.criterions['scale_invariant_mse'](
                 self.model.lighting.intensity[self.model.lighting.train_light_indices],
                 self.dataset.light_intensity_GT[self.model.lighting.train_light_indices])
             self.log('test/simse_light', simse, prog_bar=True)
@@ -434,7 +423,7 @@ class MvscpsSystem(pl.LightningModule, SaverMixin):
         light_dir_est[..., [1, 2]] = -light_dir_est[..., [1, 2]]  # opencv to opengl convert
         if self.dataset.light_dirs_GT is not None:
             light_dir_gt = self.dataset.light_dirs_GT[self.model.lighting.train_light_indices]
-            light_mae = self.criterions['mae'](light_dir_est.reshape(-1, 3), light_dir_gt.reshape(-1, 3))[0]
+            light_mae = self.criterions['angular_error'](light_dir_est.reshape(-1, 3), light_dir_gt.reshape(-1, 3))[0]
             self.log('test/mae_light', light_mae, prog_bar=True)
 
         # save images of light directions and intensity
@@ -461,28 +450,52 @@ class MvscpsSystem(pl.LightningModule, SaverMixin):
             self.log('test/cd', cd, prog_bar=True)
             self.log('test/fscore', fscore, prog_bar=True)
 
+        # ---- write the final test metrics summary (json + txt) ----
+        def _mean(key):
+            vals = [s[key].item() for s in out if key in s]
+            return float(np.mean(vals)) if vals else None
+
+        summary = {
+            'step': int(self.trained_global_step),
+            'psnr': _mean('psnr'),
+            'ssim': _mean('ssim'),
+            'lpips': _mean('lpips'),
+            'mae_normal': _mean('mae_normal'),
+            'mae_light': float(light_mae) if self.dataset.light_dirs_GT is not None else None,
+            'cd': float(cd) if self.dataset.gt_mesh_fpath is not None else None,
+            'fscore': float(fscore) if self.dataset.gt_mesh_fpath is not None else None,
+        }
+        self._write_metrics_summary(summary)
+
 
     def on_predict_batch_start(self, batch, batch_idx, dataloader_idx):
         self.dataset = self.trainer.datamodule.predict_dataloader()[dataloader_idx].dataset
         update_module_step(self.model, self.current_epoch, self.global_step)
+
+    def _mesh_filename(self, space, dir_prefix=""):
+        """Canonical mesh PLY name, e.g. 'it20000_mc512_world_space.ply', under dir_prefix."""
+        iso = self.config.model.geometry.isosurface
+        stem = f"it{self.trained_global_step}_{iso.method}{iso.resolution}"
+        return os.path.join(dir_prefix, f"{stem}_{space}_space.ply")
+
+    def _extract_and_save_mesh(self, dir_prefix=""):
+        """Marching-cubes extract the SDF mesh, save the object-space and (O2W-transformed)
+        world-space PLYs, clean isolated clusters from both, and return the world-space path."""
+        mesh = self.model.export(self.config.export)
+        obj_fpath = self.save_mesh(self._mesh_filename("obj", dir_prefix), **mesh)
+        self.remove_isolated_clusters(obj_fpath)
+
+        mesh["v_pos"] = mesh["v_pos"] * self.dataset.O2W_scale + torch.tensor(self.dataset.O2W_translation)
+        world_fpath = self.save_mesh(self._mesh_filename("world", dir_prefix), **mesh)
+        self.remove_isolated_clusters(world_fpath)
+        return world_fpath
 
     def _predict_step_mesh(self, batch, batch_idx):
         C2W_list = batch['C2W'].detach().cpu().numpy()
         K_list = batch['K'].detach().cpu().numpy()
         img_h, img_w = batch['img_h'], batch['img_w']
 
-        mesh = self.model.export(self.config.export)
-        mesh["v_pos"] = mesh["v_pos"]
-        mesh_fname_obj = f"it{self.trained_global_step}_{self.config.model.geometry.isosurface.method}{self.config.model.geometry.isosurface.resolution}_obj_space.ply"
-        mesh_fpath_obj = self.save_mesh(mesh_fname_obj, **mesh)
-        self.remove_isolated_clusters(mesh_fpath_obj)
-
-        mesh["v_pos"] = mesh["v_pos"] * self.dataset.O2W_scale + torch.tensor(self.dataset.O2W_translation)
-        mesh_fname = f"it{self.trained_global_step}_{self.config.model.geometry.isosurface.method}{self.config.model.geometry.isosurface.resolution}_world_space.ply"
-        mesh_fpath = self.save_mesh(mesh_fname, **mesh)
-
-        self.remove_isolated_clusters(mesh_fpath)
-
+        mesh_fpath = self._extract_and_save_mesh()
         mesh = pv.read(mesh_fpath)
 
         mesh_draw_dir = self.get_save_path(f"it{self.trained_global_step}_mesh_draw")
@@ -615,18 +628,7 @@ class MvscpsSystem(pl.LightningModule, SaverMixin):
     
     def export(self):
         import open3d as o3d
-        mesh = self.model.export(self.config.export)
-        mesh["v_pos"] = mesh["v_pos"]
-        mesh_fname_obj = os.path.join(f"mesh/it{self.trained_global_step}", f"it{self.trained_global_step}_{self.config.model.geometry.isosurface.method}{self.config.model.geometry.isosurface.resolution}_obj_space.ply")
-        mesh_fpath_obj = self.save_mesh(mesh_fname_obj, **mesh)
-        self.remove_isolated_clusters(mesh_fpath_obj)
-
-        mesh["v_pos"] = mesh["v_pos"] * self.dataset.O2W_scale + torch.tensor(self.dataset.O2W_translation)
-        mesh_fname = os.path.join(f"mesh/it{self.trained_global_step}", f"it{self.trained_global_step}_{self.config.model.geometry.isosurface.method}{self.config.model.geometry.isosurface.resolution}_world_space.ply")
-        mesh_fpath = self.save_mesh(mesh_fname, **mesh)
-
-        self.remove_isolated_clusters(mesh_fpath)
-
+        mesh_fpath = self._extract_and_save_mesh(dir_prefix=f"mesh/it{self.trained_global_step}")
         mesh = pv.read(mesh_fpath)
 
         if self.dataset.gt_mesh_fpath is not None:
@@ -635,7 +637,7 @@ class MvscpsSystem(pl.LightningModule, SaverMixin):
         os.makedirs(mesh_draw_dir, exist_ok=True)
 
         if self.dataset.gt_mesh_fpath is not None:
-            cd, fscore, eval_mesh_o3d = self.eval_mesh(mesh_fpath, self.dataset.gt_mesh_fpath, self.dataset.C2W_val_mesh, self.dataset.K_val_mesh)
+            cd, fscore, eval_mesh_o3d = self.eval_mesh(mesh_fpath, self.dataset.gt_mesh_fpath, self.dataset.C2W_mesh, self.dataset.K_mesh)
             err_mesh_path = self.get_save_path(f"mesh/it{self.trained_global_step}/it{self.trained_global_step}_gt_mesh_error_map.ply")
             o3d.io.write_triangle_mesh(err_mesh_path, eval_mesh_o3d)
             mesh_err = pv.read(err_mesh_path)
@@ -648,8 +650,8 @@ class MvscpsSystem(pl.LightningModule, SaverMixin):
             img_h = self.dataset.img_h
             img_w = self.dataset.img_w
 
-        for pose_id, c2w in tqdm(enumerate(self.dataset.C2W_val_mesh)):
-            fy = self.dataset.K_val_mesh[pose_id][1, 1]
+        for pose_id, c2w in tqdm(enumerate(self.dataset.C2W_mesh)):
+            fy = self.dataset.K_mesh[pose_id][1, 1]
             mesh_fpath = os.path.join(mesh_draw_dir, f"{pose_id:02d}_eval.png")
 
             self.draw_mesh(mesh, c2w, fy, img_h, img_w, mesh_fpath)
@@ -720,14 +722,6 @@ class MvscpsSystem(pl.LightningModule, SaverMixin):
         cd, fscore = chamfer_distance_and_f1_score(pts_gt, pts_eval)
         print("Mesh evaluation done.")
         return cd, fscore, eval_mesh_o3d
-
-    def slice(self):
-        import matplotlib.pyplot as plt
-        sdf_plane = self.model.slice()
-        plt.imshow(sdf_plane, cmap='jet')
-        plt.colorbar()
-        plt.contour(sdf_plane, levels=[0], colors='black')
-        plt.savefig(f"{self.save_dir}/it{self.global_step}-slice.png", transparent=True)
 
     def remove_isolated_clusters(self, mesh_fpath):
         import copy

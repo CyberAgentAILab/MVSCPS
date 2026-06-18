@@ -5,13 +5,14 @@ import numpy as np
 from torch.utils.data import Dataset
 
 from core.registry import REG
-from dataloader.utils import (generate_sphere_normal_map,
+from dataloader.utils import (parse_light_idx, parse_view_idx,
+                              generate_sphere_normal_map,
                               get_camera_space_ray_directions,
                               get_world_space_ray_directions)
 
 
-@REG.register("dataset", name='brdf_render')
-class DiligentTestDataset(Dataset):
+@REG.register("dataset", name='dataset_brdf_render')
+class BrdfRenderDataset(Dataset):
     def __init__(self, cfg):
         self.cfg = cfg
         cfg_brdf = cfg.predict_brdf
@@ -33,7 +34,7 @@ class DiligentTestDataset(Dataset):
         C2W, K = self.camera_select_fn(self.view_light_index_test, self.cams, img_downscale=cfg_brdf.img_downscale)
         rays_dir_camera_space = get_camera_space_ray_directions(self.img_h, self.img_w, K)  # (H, W, 3)
 
-        view_idx = int(self.view_light_index_test.split("V")[1].split("L")[0])
+        view_idx = parse_view_idx(self.view_light_index_test)
         mask_fpath = glob.glob(os.path.join(cfg.data_dir, cfg.mask_dirname, f'V{view_idx:02d}*.{cfg.mask_ext}'))[0]
         # mask_fpath = os.path.join(cfg.data_dir, cfg.mask_dirname, f'{self.view_light_index_test}.{cfg.mask_ext}')
         fg_mask = self.mask_load_fn(mask_fpath, img_downscale=cfg_brdf.img_downscale)

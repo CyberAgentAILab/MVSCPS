@@ -8,6 +8,7 @@ from icecream import ic
 from torch.utils.data import IterableDataset
 
 from core.registry import REG
+from dataloader.utils import parse_light_idx, parse_view_idx
 
 
 @REG.register("dataset", name='dataset_train')
@@ -34,14 +35,14 @@ class DiligentTrainDataset(IterableDataset):
         # load training image indices
         with open(cfg.train.view_light_index_file, 'r') as f:
             self.view_light_indices = f.read().splitlines()
-        self.light_idx = np.array([int(idx.split("L")[-1]) for idx in self.view_light_indices])
+        self.light_idx = np.array([parse_light_idx(idx) for idx in self.view_light_indices])
 
         self.has_mask = True
 
         # load images and masks
         with ThreadPoolExecutor(max_workers=min(64, os.cpu_count())) as executor:
             def load_img_and_mask(view_light_index):
-                view_idx = int(view_light_index.split("V")[1].split("L")[0])
+                view_idx = parse_view_idx(view_light_index)
                 img_fpath = os.path.join(cfg.data_dir, cfg.img_dirname, f'{view_light_index}.{cfg.img_ext}')
                 mask_fpath = os.path.join(cfg.data_dir, cfg.mask_dirname, f'V{view_idx:02d}.{cfg.mask_ext}')
                 print("Loading", img_fpath, mask_fpath)
@@ -85,13 +86,13 @@ class DiligentTrainDataset(IterableDataset):
             # And prepare a mapping from all view-light indices (i.e., all image indices) to unique view indices.
             # So that we can index into the normal maps correctly for evaluation.
             self.all_image_to_unique_view_mapping = np.array(
-                [int(idx.split("V")[1].split("L")[0]) for idx in self.view_light_indices])
+                [parse_view_idx(idx) for idx in self.view_light_indices])
             self.unique_train_view_indices = np.unique(self.all_image_to_unique_view_mapping)
             self.unique_train_view_light_indices = []
 
             for i in self.unique_train_view_indices:
                 for j in self.view_light_indices:
-                    if int(j.split("V")[1].split("L")[0]) == i:
+                    if parse_view_idx(j) == i:
                         self.unique_train_view_light_indices.append(j)
                         break
 
@@ -102,7 +103,7 @@ class DiligentTrainDataset(IterableDataset):
 
             with ThreadPoolExecutor(max_workers=min(64, os.cpu_count())) as executor:
                 def load_normal(view_light_index):
-                    view_idx = int(view_light_index.split("V")[1].split("L")[0])
+                    view_idx = parse_view_idx(view_light_index)
                     normal_fpath = os.path.join(cfg.data_dir, cfg.normal_dirname, f'V{view_idx:02d}.{cfg.normal_ext}')
                     C2W, _ = self.camera_select_fn(view_light_index, self.cams)
                     R_C2W = C2W[:3, :3]
@@ -112,10 +113,10 @@ class DiligentTrainDataset(IterableDataset):
                     return normal_cam, normal_world
 
                 print("Loading normal maps...")
-                normal_maps_val_camera_space, normal_maps_val_world_space = zip(
+                normal_maps_camera_space, normal_maps_world_space = zip(
                     *list(executor.map(load_normal, self.unique_train_view_light_indices)))
-                self.normal_maps_val_world_space = np.stack(normal_maps_val_world_space, 0)  # (N_unique_views, H, W, 3)
-                self.normal_maps_val_camera_space = np.stack(normal_maps_val_camera_space, 0)  # (N_unique_views, H, W, 3)
+                self.normal_maps_world_space = np.stack(normal_maps_world_space, 0)  # (N_unique_views, H, W, 3)
+                self.normal_maps_camera_space = np.stack(normal_maps_camera_space, 0)  # (N_unique_views, H, W, 3)
                 print("Loading normal maps done.")
         else:
             self.has_gt_normal = False
@@ -136,7 +137,7 @@ class DiligentTrainDataset(IterableDataset):
         print("Training data loaded!")
         ic(self.images_train.shape,
            self.fg_masks_train.shape,
-           self.normal_maps_val_camera_space.shape if self.has_gt_normal else None,
+           self.normal_maps_camera_space.shape if self.has_gt_normal else None,
            self.C2W_train.shape,
            self.K_train.shape,
            self.camera_centers_train_obj_space.shape)
@@ -157,7 +158,7 @@ class DiligentTrainDataset(IterableDataset):
             batch_rgb = self.images_train[batch_rays_image_index, y, x].reshape(-1, 3)
             batch_fg_mask = self.fg_masks_train[batch_rays_image_index, y, x].reshape(-1)
             if self.has_gt_normal:
-                batch_normal = self.normal_maps_val_world_space[
+                batch_normal = self.normal_maps_world_space[
                     self.all_image_to_unique_view_list_idx[batch_rays_image_index], y, x].reshape(-1,
                                                                                                  3) if self.has_gt_normal else None
 

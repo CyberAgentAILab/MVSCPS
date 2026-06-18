@@ -9,7 +9,6 @@ export TORCH_CUDA_ARCH_LIST="8.9;8.0"
 
 # --- Runtime toggles ---
 export PL_WEIGHTS_ONLY=0
-export WANDB_MODE=disabled
 
 # --- Experiment knobs ---
 NUM_LIGHT_LIST=(32)

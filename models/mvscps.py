@@ -98,7 +98,6 @@ class NeuSModel(nn.Module):
         estimated_next_sdf = sdf[...,None] + iter_cos * dists[...,None] * 0.5
         estimated_prev_sdf = sdf[...,None] - iter_cos * dists[...,None] * 0.5
 
-        # ic(estimated_prev_sdf.shape, inv_s.shape)
         prev_cdf = torch.sigmoid(estimated_prev_sdf * inv_s)
         next_cdf = torch.sigmoid(estimated_next_sdf * inv_s)
 
@@ -108,7 +107,6 @@ class NeuSModel(nn.Module):
         return alpha
 
     def shadow_render_volume_render(self, surface_points, surface_point_to_light_dir, n_samples=128, lnear=1e-2, lfar=0.5):
-        # ic(surface_points.shape, surface_point_to_light_dir.shape)
         # sample points uniformly
         t = torch.linspace(lnear, lfar, n_samples, device=surface_points.device, dtype=surface_points.dtype)
 
@@ -336,7 +334,6 @@ class NeuSModel(nn.Module):
             light_dir_brdf = Fn.normalize(light_dir_brdf, p=2, dim=-1)
 
             # all vectors in camera space, since angular encoding is used
-            # ic(surface_point_feature.shape, normal_camera_sphere_input.shape, t_dirs_brdf.shape, light_dir_brdf.shape)
             brdf_values = self.brdf(surface_point_feature, normal_camera_sphere_input, t_dirs_brdf, light_dir_brdf)  # (N_samples, 3)
             brdf_values = brdf_values/ brdf_values.max()
             brdf_values= torch.pow(brdf_values, 1/2.2)
@@ -388,7 +385,7 @@ class NeuSModel(nn.Module):
         return mesh
 
     @torch.no_grad()
-    def slice(self, ):
+    def slice_sdf_plane(self):
         sdf_plane = self.geometry.slice_plane()
 
         return sdf_plane

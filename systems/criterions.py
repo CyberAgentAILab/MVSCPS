@@ -36,7 +36,7 @@ def scale_invariant_mse(pred_i, gt_i):
     return ints_ratio.mean().item(), ints_ratio.mean(dim=-1)
 
 
-class MAE(nn.Module):
+class AngularError(nn.Module):
     def __init__(self):
         super().__init__()
 

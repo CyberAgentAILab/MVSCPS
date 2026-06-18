@@ -9,7 +9,6 @@ export TORCH_CUDA_ARCH_LIST="8.9;8.0"
 
 # --- Runtime toggles ---
 export PL_WEIGHTS_ONLY=0
-export WANDB_MODE=disabled
 
 obj_name_list=("20250205_ceramic_buddha" "20250303_bronze_loong" "20250304_diffuse_dog" "20250304_diffuse_flower_girl" "20250304_metallic_fox" "20250515_ceramic_buddha")
 

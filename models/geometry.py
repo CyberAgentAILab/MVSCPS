@@ -11,16 +11,14 @@ from pytorch_lightning.utilities.rank_zero import rank_zero_info
 from core.registry import REG
 from models.base import BaseModel
 from models.network_utils import get_encoding, get_mlp
-from models.utils import chunk_batch, cleanup, get_activation, scale_anything
+from models.utils import chunk_batch, cleanup, get_activation, remap_range
 from systems.utils import update_module_step
-from utils.misc import get_rank
 
 
 class VarianceNetwork(nn.Module):
     def __init__(self, config):
         super(VarianceNetwork, self).__init__()
         self.config = config
-        self.init_val = self.config.init_val
         self.register_parameter('variance', nn.Parameter(torch.tensor(self.config.init_val)))
         self.modulate = self.config.get('modulate', False)
         if self.modulate:
@@ -51,9 +49,9 @@ class VarianceNetwork(nn.Module):
 
 def contract_to_unisphere(x, radius, contraction_type):
     if contraction_type == ContractionType.AABB:
-        x = scale_anything(x, (-radius, radius), (0, 1))
+        x = remap_range(x, (-radius, radius), (0, 1))
     elif contraction_type == ContractionType.UN_BOUNDED_SPHERE:
-        x = scale_anything(x, (-radius, radius), (0, 1))
+        x = remap_range(x, (-radius, radius), (0, 1))
         x = x * 2 - 1  # aabb is at [-1, 1]
         mag = x.norm(dim=-1, keepdim=True)
         mask = mag.squeeze(-1) > 1
@@ -64,24 +62,12 @@ def contract_to_unisphere(x, radius, contraction_type):
     return x
 
 
-def contract_to_unit_bbox(uv, img_wh):
-    # u: x axis, v: y axis
-    uv_norm = 2 * uv / torch.tensor(img_wh, device=uv.device) - 1
-    return uv_norm
-
-
 class MarchingCubeHelper(nn.Module):
-    def __init__(self, use_torch=True):
+    def __init__(self):
         super().__init__()
-        self.use_torch = use_torch
         self.points_range = (0, 1)
-        if self.use_torch:
-            import torchmcubes
-            self.mc_func = torchmcubes.marching_cubes
-        else:
-            import mcubes
-            self.mc_func = mcubes.marching_cubes
-        self.verts = None
+        import mcubes
+        self.mc_func = mcubes.marching_cubes
 
     def grid_vertices(self, resolution=256):
         x, y, z = torch.linspace(*self.points_range, resolution), torch.linspace(*self.points_range, resolution), torch.linspace(*self.points_range, resolution)
@@ -93,14 +79,9 @@ class MarchingCubeHelper(nn.Module):
     def forward(self, level, threshold=0., resolution=256):
         if type(level) is not torch.Tensor:
             level = torch.cat(level, dim=0)
-        ic(level.shape)
         level = level.float().view(resolution, resolution, resolution)
-        if self.use_torch:
-            verts, faces = self.mc_func(level.to(get_rank()), threshold)
-            verts, faces = verts.cpu(), faces.cpu().long()
-        else:
-            verts, faces = self.mc_func(-level.numpy(), threshold) # transform to numpy
-            verts, faces = torch.from_numpy(verts.astype(np.float32)), torch.from_numpy(faces.astype(np.int64)) # transform back to pytorch
+        verts, faces = self.mc_func(-level.numpy(), threshold)  # mcubes expects the negated SDF
+        verts, faces = torch.from_numpy(verts.astype(np.float32)), torch.from_numpy(faces.astype(np.int64))
         verts = verts / (resolution - 1.)
         return {
             'v_pos': verts,
@@ -112,10 +93,9 @@ class BaseImplicitGeometry(BaseModel):
     def __init__(self, config):
         super().__init__(config)
         if self.config.isosurface is not None:
-            assert self.config.isosurface.method in ['mc', 'mc-torch']
-            if self.config.isosurface.method == 'mc-torch':
-                raise NotImplementedError("Please do not use mc-torch. It currently has some scaling issues I haven't fixed yet.")
-            self.helper = MarchingCubeHelper(use_torch=self.config.isosurface.method=='mc-torch')
+            assert self.config.isosurface.method == 'mc', \
+                f"only 'mc' (mcubes) isosurface extraction is supported, got {self.config.isosurface.method!r}"
+            self.helper = MarchingCubeHelper()
         self.radius = self.config.get('radius', 1.0)
         img_rootdir = self.config.get('img_rootdir', None)
         if img_rootdir is not None:
@@ -129,14 +109,12 @@ class BaseImplicitGeometry(BaseModel):
     def forward_level(self, points, with_grad):
         raise NotImplementedError
 
-    def isosurface_(self, vmin, vmax, resolution):
-        # ic(vmin, vmax)
+    def _isosurface_in_bbox(self, vmin, vmax, resolution):
         def batch_func(x, ph=None):
-            # ic(x.shape)
             x = torch.stack([
-                scale_anything(x[...,0], (0, 1), (vmin[0], vmax[0])),
-                scale_anything(x[...,1], (0, 1), (vmin[1], vmax[1])),
-                scale_anything(x[...,2], (0, 1), (vmin[2], vmax[2])),
+                remap_range(x[...,0], (0, 1), (vmin[0], vmax[0])),
+                remap_range(x[...,1], (0, 1), (vmin[1], vmax[1])),
+                remap_range(x[...,2], (0, 1), (vmin[2], vmax[2])),
             ], dim=-1).to(self.rank)
             rv = self.forward_level(x).cpu()
             cleanup()
@@ -145,9 +123,9 @@ class BaseImplicitGeometry(BaseModel):
         level = chunk_batch(batch_func, self.config.isosurface.chunk, True, self.helper.grid_vertices(resolution=resolution))
         mesh = self.helper(level, threshold=self.config.isosurface.threshold, resolution=resolution)
         mesh['v_pos'] = torch.stack([
-            scale_anything(mesh['v_pos'][...,0], (0, 1), (vmin[0], vmax[0])),
-            scale_anything(mesh['v_pos'][...,1], (0, 1), (vmin[1], vmax[1])),
-            scale_anything(mesh['v_pos'][...,2], (0, 1), (vmin[2], vmax[2]))
+            remap_range(mesh['v_pos'][...,0], (0, 1), (vmin[0], vmax[0])),
+            remap_range(mesh['v_pos'][...,1], (0, 1), (vmin[1], vmax[1])),
+            remap_range(mesh['v_pos'][...,2], (0, 1), (vmin[2], vmax[2]))
         ], dim=-1)
         return mesh
 
@@ -177,13 +155,13 @@ class BaseImplicitGeometry(BaseModel):
     def isosurface(self):
         if self.config.isosurface is None:
             raise NotImplementedError
-        mesh_coarse = self.isosurface_((-self.radius, -self.radius, -self.radius), (self.radius, self.radius, self.radius), 128)
+        mesh_coarse = self._isosurface_in_bbox((-self.radius, -self.radius, -self.radius), (self.radius, self.radius, self.radius), 128)
 
         vmin, vmax = mesh_coarse['v_pos'].amin(dim=0), mesh_coarse['v_pos'].amax(dim=0)
         vmin_ = (vmin - (vmax - vmin) * 0.1).clamp(-self.radius, self.radius)
         vmax_ = (vmax + (vmax - vmin) * 0.1).clamp(-self.radius, self.radius)
 
-        mesh_fine = self.isosurface_(vmin_, vmax_, self.config.isosurface.resolution)
+        mesh_fine = self._isosurface_in_bbox(vmin_, vmax_, self.config.isosurface.resolution)
         return mesh_fine
 
 @REG.register('model', name='neural_sdf')
@@ -235,7 +213,7 @@ class VolumeSDF(BaseImplicitGeometry):
                             ]
                         ).to(points_)
                         points_d_ = (points_[...,None,:] + offsets).clamp(-self.radius, self.radius)
-                        points_d = scale_anything(points_d_, (-self.radius, self.radius), (0, 1))
+                        points_d = remap_range(points_d_, (-self.radius, self.radius), (0, 1))
                         points_d_sdf = self.network(self.encoding(points_d.view(-1, 3)))[...,0].view(*points.shape[:-1], 6).float()
                         grad = 0.5 * (points_d_sdf[..., 0::2] - points_d_sdf[..., 1::2]) / eps  
 

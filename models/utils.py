@@ -19,7 +19,6 @@ def chunk_batch(func, chunk_size, move_to_cpu, *args, **kwargs):
     out_type = None
     for i in range(0, B, chunk_size):
         out_chunk = func(*[arg[i:i+chunk_size] if isinstance(arg, torch.Tensor) else arg for arg in args], **kwargs)
-        # ic(out_chunk)
         if out_chunk is None:
             continue
         out_type = type(out_chunk)
@@ -37,9 +36,6 @@ def chunk_batch(func, chunk_size, move_to_cpu, *args, **kwargs):
             v = v if torch.is_grad_enabled() else v.detach()
             v = v.cpu() if move_to_cpu else v
             out[k].append(v)
-    # ic(out["comp_rgb"][0].shape)
-    # ic(out[0].shape)
-    # ic(out_type)
     if out_type is None:
         return
     if out_type is dict:
@@ -104,19 +100,10 @@ def get_activation(name):
     elif name == "softplus":
         return lambda x: F.softplus(x)
     else:
-        # ic(getattr(F, name))
         return getattr(F, name)
 
 
-def dot(x, y):
-    return torch.sum(x*y, -1, keepdim=True)
-
-
-def reflect(x, n):
-    return 2 * dot(x, n) * n - x
-
-
-def scale_anything(dat, inp_scale, tgt_scale):
+def remap_range(dat, inp_scale, tgt_scale):
     if inp_scale is None:
         inp_scale = [dat.min(), dat.max()]
     dat = (dat  - inp_scale[0]) / (inp_scale[1] - inp_scale[0])

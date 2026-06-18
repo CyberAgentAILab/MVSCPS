@@ -40,31 +40,3 @@ def plot_light(x, y, save_name, c=None):
     extent = ax.get_window_extent().transformed(fig.dpi_scale_trans.inverted())
     plt.savefig(save_name, bbox_inches=extent, transparent=True)
     plt.close()
-
-def plot_lighting(dirs, ints, save_dir):
-    # Visualize light direction and intensity
-    save_name = os.path.join(save_dir, 'est_light_map.png')
-    if len(ints.shape) > 1:
-        ints = ints.mean(-1)
-    ints = ints / ints.max()
-    plot_light(dirs[:,0], dirs[:, 1], save_name, ints)
-
-def plot_lighting_gt(dirs, ints, save_dir):
-    # Visualize light direction and intensity
-    save_name = os.path.join(save_dir, 'light_map_gt.pdf')
-    if len(ints.shape) > 1:
-        ints = ints.mean(-1)
-    ints = ints / ints.max()
-    plot_light(dirs[:,0], dirs[:, 1], save_name, ints)
-
-def plot_dir_error(light, error, save_dir):
-    # plot light direction estimation error
-    save_name = os.path.join(save_dir, 'est_light_error_dir.png')
-    error = error / 25
-    plot_light(light[:,0], light[:, 1], save_name, error)
-
-def plot_int_error(light, error, save_dir):
-    # plot light intensity estimation error
-    save_name = os.path.join(save_dir, 'est_light_error_int.png')
-    error = error / 0.2
-    plot_light(light[:,0], light[:, 1], save_name, error)

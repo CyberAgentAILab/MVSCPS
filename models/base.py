@@ -18,13 +18,7 @@ class BaseModel(nn.Module):
     
     def update_step(self, epoch, global_step):
         pass
-    
-    def train(self, mode=True):
-        return super().train(mode=mode)
-    
-    def eval(self):
-        return super().eval()
-    
+
     def regularizations(self, out):
         return {}
     

@@ -14,11 +14,11 @@ from utils.misc import config_to_primitive, get_rank
 class VanillaFrequency(nn.Module):
     def __init__(self, in_channels, config):
         super().__init__()
-        self.N_freqs = config['n_frequencies']
+        self.n_frequencies = config['n_frequencies']
         self.in_channels, self.n_input_dims = in_channels, in_channels
         self.funcs = [torch.sin, torch.cos]
-        self.freq_bands = 2**torch.linspace(0, self.N_freqs-1, self.N_freqs)
-        self.n_output_dims = self.in_channels * (len(self.funcs) * self.N_freqs)
+        self.freq_bands = 2**torch.linspace(0, self.n_frequencies-1, self.n_frequencies)
+        self.n_output_dims = self.in_channels * (len(self.funcs) * self.n_frequencies)
         self.n_masking_step = config.get('n_masking_step', 0)
         self.update_step(None, None) # mask should be updated at the beginning each step
 
@@ -31,9 +31,9 @@ class VanillaFrequency(nn.Module):
 
     def update_step(self, epoch, global_step):
         if self.n_masking_step <= 0 or global_step is None:
-            self.mask = torch.ones(self.N_freqs, dtype=torch.float32)
+            self.mask = torch.ones(self.n_frequencies, dtype=torch.float32)
         else:
-            self.mask = (1. - torch.cos(math.pi * (global_step / self.n_masking_step * self.N_freqs - torch.arange(0, self.N_freqs)).clamp(0, 1))) / 2.
+            self.mask = (1. - torch.cos(math.pi * (global_step / self.n_masking_step * self.n_frequencies - torch.arange(0, self.n_frequencies)).clamp(0, 1))) / 2.
             rank_zero_debug(f'Update mask: {global_step}/{self.n_masking_step} {self.mask}')
 
 
@@ -46,11 +46,11 @@ class ProgressiveBandHashGrid(nn.Module):
         with torch.cuda.device(get_rank()):
             self.encoding = tcnn.Encoding(in_channels, encoding_config)
         self.n_output_dims = self.encoding.n_output_dims
-        self.n_level = config['n_levels']
+        self.n_levels = config['n_levels']
         self.n_features_per_level = config['n_features_per_level']
         self.start_level, self.start_step, self.update_steps = config['start_level'], config['start_step'], config['update_steps']
         self.current_level = self.start_level
-        self.mask = torch.zeros(self.n_level * self.n_features_per_level, dtype=torch.float32, device=get_rank())
+        self.mask = torch.zeros(self.n_levels * self.n_features_per_level, dtype=torch.float32, device=get_rank())
 
     def forward(self, x):
         enc = self.encoding(x)
@@ -58,7 +58,7 @@ class ProgressiveBandHashGrid(nn.Module):
         return enc
 
     def update_step(self, epoch, global_step):
-        current_level = min(self.start_level + max(global_step - self.start_step, 0) // self.update_steps, self.n_level)
+        current_level = min(self.start_level + max(global_step - self.start_step, 0) // self.update_steps, self.n_levels)
         if current_level > self.current_level:
             rank_zero_info(f'Update grid level to {current_level}')
         self.current_level = current_level
@@ -107,7 +107,6 @@ class VanillaMLP(nn.Module):
     
     @torch.amp.autocast('cuda', enabled=False)
     def forward(self, x):
-        # ic(x.device)
         x = self.layers(x.float())
         x = self.output_activation(x)
         return x

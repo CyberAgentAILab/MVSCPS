@@ -7,9 +7,9 @@ from models.network_utils import get_encoding, get_mlp
 
 
 @REG.register('model', name='neural_brdf')
-class VolumeRadianceNear(nn.Module):
+class NeuralBRDF(nn.Module):
     def __init__(self, config):
-        super(VolumeRadianceNear, self).__init__()
+        super(NeuralBRDF, self).__init__()
         self.config = config
         self.use_ae = self.config.get('use_ae', True)
         self.num_ae = self.config.get('num_ae', 5)
@@ -62,10 +62,10 @@ class VolumeRadianceNear(nn.Module):
     def regularizations(self, out):
         return {}
 
-@REG.register('model', name='shadow-mapping')
-class ShadowNet(nn.Module):
+@REG.register('model', name='shadow_mapping')
+class ShadowRefinementNet(nn.Module):
     def __init__(self, config):
-        super(ShadowNet, self).__init__()
+        super(ShadowRefinementNet, self).__init__()
         self.config = config
         self.n_output_dims = 1
 

@@ -8,7 +8,7 @@ from dataloader.utils import (generate_ring_lights,
                               get_world_space_ray_directions)
 
 
-@REG.register("dataset", name='relighting')
+@REG.register("dataset", name='dataset_relighting')
 class DiligentPredictDataset(Dataset):
     def __init__(self, cfg):
         cfg_relighting = cfg.predict_relighting

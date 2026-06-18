@@ -88,7 +88,7 @@ dataset:
 #  predict_targets: ["predict_mesh", "predict_brdf", "predict_relighting"] # specify which predictions to make during export phase.
   predict_targets: ["predict_brdf", "predict_relighting"]
   predict_mesh:
-    dataset_name: mesh_export
+    dataset_name: dataset_mesh_export
     predict_step_fn_name: _predict_step_mesh
     gt_mesh_fpath: ${conf.dataset.data_dir}/mesh_Gt.ply
     bbox_res: 512  # in voxel
@@ -99,7 +99,7 @@ dataset:
     img_downscale: 1 # for mesh rendering
 
   predict_brdf:
-    dataset_name: brdf_render
+    dataset_name: dataset_brdf_render
     predict_step_fn_name: _predict_step_brdf
     img_downscale: 1 # for brdf map rendering
     brdf_sphere_res: 64 # in pixel
@@ -107,7 +107,7 @@ dataset:
     light_direction: [0, 0, -1]  # ensure negative z component. Will be normalized in the code.
 
   predict_relighting: # for novel-view relighting rendering
-    dataset_name: relighting
+    dataset_name: dataset_relighting
     predict_step_fn_name: _predict_step_relighting
     img_width: 512 # in pixel
     img_height: 512 # in pixel
@@ -187,7 +187,7 @@ model:
       n_neurons: 64
       n_hidden_layers: 2
   shadow:
-    name: shadow-mapping
+    name: shadow_mapping
     input_feature_dim: ${add:${conf.model.geometry.feature_dim}, -1} # surface normal as additional input
     dir_encoding_config:
       otype: SphericalHarmonics

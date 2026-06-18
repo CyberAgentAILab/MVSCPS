@@ -18,7 +18,7 @@ from dataloader.main_datamodule import MainDataModule
 from pytorch_lightning import Trainer
 from pytorch_lightning.callbacks import (LearningRateMonitor,
                                          ModelCheckpoint)
-from pytorch_lightning.loggers import WandbLogger
+from pytorch_lightning.loggers import CSVLogger
 
 from utils.callbacks import (CodeSnapshotCallback, ConfigSnapshotCallback,
                              CustomProgressBar)
@@ -109,14 +109,12 @@ def main(config : DictConfig) -> None:
         ]
 
         loggers += [
-            WandbLogger(
-                id=cfg.exp.trial_name,  # fixed run id (use your trial_name)
-                resume="allow",  # allow resuming/appending
-                name=cfg.exp.trial_name,
-                project=cfg.exp.name,
+            # Local CSV logging (replaces W&B). Writes <exp_path>/<trial_name>/metrics.csv
+            # with every self.log() scalar over training/validation steps.
+            CSVLogger(
                 save_dir=cfg.exp.exp_path,
-                log_model=False,  # set True if you want to upload checkpoints to W&B
-                reinit=True
+                name=cfg.exp.trial_name,
+                version="",
             )
         ]
 

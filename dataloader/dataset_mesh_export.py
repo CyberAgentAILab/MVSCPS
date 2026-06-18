@@ -6,9 +6,10 @@ import numpy as np
 from torch.utils.data import Dataset
 
 from core.registry import REG
+from dataloader.utils import parse_light_idx, parse_view_idx
 
 
-@REG.register("dataset", name='mesh_export')
+@REG.register("dataset", name='dataset_mesh_export')
 class MeshExportDataset(Dataset):
     def __init__(self, cfg):
         self.config = cfg
@@ -30,13 +31,13 @@ class MeshExportDataset(Dataset):
             self.view_light_indices = f.read().splitlines()
 
         self.unique_view_indices = np.unique(
-            [int(idx.split("V")[1].split("L")[0]) for idx in self.view_light_indices])
+            [parse_view_idx(idx) for idx in self.view_light_indices])
 
         # select the view-light indices with unique view indices
         self.unique_view_light_indices = []
         for i in self.unique_view_indices:
             for j  in self.view_light_indices:
-                if int(j.split("V")[1].split("L")[0]) == i:
+                if parse_view_idx(j) == i:
                     self.unique_view_light_indices.append(j)
                     break
 
