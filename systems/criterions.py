@@ -6,6 +6,12 @@ from scipy.spatial import KDTree
 
 # from https://github.com/junxuan-li/SCPS-NIR/blob/775db12dea996a6a04af46582b3e60422bcba776/utils.py#L16
 def scale_invariant_mse(pred_i, gt_i):
+    """Per-channel, scale-aligned relative error between predicted and GT light
+    intensities (N, 3). For each RGB channel a single least-squares scale aligns
+    pred to gt (so the metric ignores a global per-channel gain), then the relative
+    abs error |gt - scale*pred| / (gt + eps) is averaged over channels.
+    Returns (scalar mean, per-sample mean over the 3 channels). eps=1e-8 guards
+    division for near-zero intensities."""
     if not isinstance(pred_i, torch.Tensor):
         pred_i = torch.from_numpy(pred_i)
     if not isinstance(gt_i, torch.Tensor):
@@ -37,6 +43,9 @@ def scale_invariant_mse(pred_i, gt_i):
 
 
 class AngularError(nn.Module):
+    """Mean angular error (in degrees) between two sets of direction vectors --
+    used for both surface normals and light directions. Returns (mean_error_deg,
+    per_element_error_deg); an optional boolean valid_mask restricts the mean."""
     def __init__(self):
         super().__init__()
 

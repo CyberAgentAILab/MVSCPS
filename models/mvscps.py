@@ -42,6 +42,9 @@ class NeuSModel(nn.Module):
 
         self.randomized = self.config.randomized
         self.background_color = torch.ones((3,), dtype=torch.float32, device=self.rank)
+        # Constant ray-marching step = (AABB diagonal) / num_samples, so a ray crossing
+        # the box along its longest axis still gets ~num_samples points. The AABB side is
+        # 2*radius, so its diagonal is sqrt(3) * 2 * radius (1.732 ~= sqrt(3)).
         self.render_step_size = 1.732 * 2 * self.config.radius / self.config.num_samples_per_ray
     
     def update_step(self, epoch, global_step):
@@ -52,6 +55,9 @@ class NeuSModel(nn.Module):
         self.cos_anneal_ratio = 1.0 if cos_anneal_end == 0 else min(1.0, global_step / cos_anneal_end)
 
         def occ_eval_fn(x):
+            # Map SDF -> pseudo-occupancy for the nerfacc occupancy grid pruning.
+            # The 80 is a fixed sharpness: cells well outside the surface (sdf >> 0)
+            # get ~0 occupancy and are pruned; the near-surface band stays occupied.
             sdf = self.geometry(x, with_grad=False, with_feature=False)
             alpha = torch.sigmoid(- sdf * 80)
             return alpha
@@ -249,6 +255,13 @@ class NeuSModel(nn.Module):
         return shadow_out
 
     def forward(self, rays, single_light_dir_world_space=None):
+        # rays: (N_rays, 16), columns are
+        #   [0:3]  ray origin (world / object space)
+        #   [3:6]  ray direction (world space, unit)
+        #   [6]    light index into LightingParameters (train/val) -- ignored when
+        #          single_light_dir_world_space is given (relighting)
+        #   [7:16] per-ray camera-to-world rotation R_c2w, row-major flattened (3x3),
+        #          used to rotate the camera-space light dir into world space
         n_rays = rays.shape[0]
         rays_origin, rays_dir_world_space = rays[:, 0:3], rays[:, 3:6] # both (N_rays, 3)
 

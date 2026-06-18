@@ -139,6 +139,8 @@ class DiligentEvalDataset(Dataset):
 
         mask = self.mask_load_fn(self.fg_masks[index], self.img_downscale)
         if self.validation_crop:
+            # Render only the foreground bounding box (faster than the full frame).
+            # axis0 = rows (image y), axis1 = cols (image x).
             mask_axis0, mask_axis1 = np.where(mask)
             min_mask_axis0 = mask_axis0.min()
             max_mask_axis0 = mask_axis0.max()
@@ -164,6 +166,7 @@ class DiligentEvalDataset(Dataset):
         fy = K[1, 1]
 
         if self.validation_crop:
+            # shift the principal point into the cropped frame (K was for the full image)
             cx = cx - min_mask_axis1
             cy = cy - min_mask_axis0
             fg_mask = mask[min_mask_axis0:max_mask_axis0, min_mask_axis1:max_mask_axis1]
@@ -180,6 +183,8 @@ class DiligentEvalDataset(Dataset):
         rays_light_index = np.repeat(light_index[None], repeats=directions.shape[0], axis=0)[..., None]  # (B, 1)
         rays_R_c2w = np.repeat(R_c2w.reshape(1, 9), repeats=directions.shape[0], axis=0)  # (B, 9)
 
+        # (B, 16) ray bundle expected by NeuSModel.forward:
+        # [0:3] origin, [3:6] direction, [6] light index, [7:16] R_c2w (3x3 flattened)
         rays = np.concatenate([rays_o, rays_d, rays_light_index, rays_R_c2w], -1)
 
         rgb = self.img_load_fn(self.images[index], self.img_downscale)

@@ -51,11 +51,13 @@ def contract_to_unisphere(x, radius, contraction_type):
     if contraction_type == ContractionType.AABB:
         x = remap_range(x, (-radius, radius), (0, 1))
     elif contraction_type == ContractionType.UN_BOUNDED_SPHERE:
+        # mip-NeRF-360 style unbounded contraction: points inside the unit ball map
+        # linearly, points outside are squashed so all of R^3 lands in a bounded box.
         x = remap_range(x, (-radius, radius), (0, 1))
         x = x * 2 - 1  # aabb is at [-1, 1]
         mag = x.norm(dim=-1, keepdim=True)
         mask = mag.squeeze(-1) > 1
-        x[mask] = (2 - 1 / mag[mask]) * (x[mask] / mag[mask])
+        x[mask] = (2 - 1 / mag[mask]) * (x[mask] / mag[mask])  # |x|>1 -> contracted into ball of radius 2
         x = x / 4 + 0.5  # [-inf, inf] is at [0, 1]
     else:
         raise NotImplementedError
@@ -215,9 +217,12 @@ class VolumeSDF(BaseImplicitGeometry):
                         points_d_ = (points_[...,None,:] + offsets).clamp(-self.radius, self.radius)
                         points_d = remap_range(points_d_, (-self.radius, self.radius), (0, 1))
                         points_d_sdf = self.network(self.encoding(points_d.view(-1, 3)))[...,0].view(*points.shape[:-1], 6).float()
-                        grad = 0.5 * (points_d_sdf[..., 0::2] - points_d_sdf[..., 1::2]) / eps  
+                        # offsets are ordered [+x,-x, +y,-y, +z,-z], so [0::2]=f(+), [1::2]=f(-)
+                        # central difference per axis: grad = (f(+) - f(-)) / (2*eps)
+                        grad = 0.5 * (points_d_sdf[..., 0::2] - points_d_sdf[..., 1::2]) / eps
 
                         if with_laplace:
+                            # 6-point Laplacian: sum_axis (f(+) + f(-) - 2*f) / eps^2
                             laplace = (points_d_sdf[..., 0::2] + points_d_sdf[..., 1::2] - 2 * sdf[..., None]).sum(-1) / (eps ** 2)
 
         rv = [sdf]

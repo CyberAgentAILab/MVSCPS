@@ -124,6 +124,8 @@ class MvscpsSystem(pl.LightningModule, SaverMixin):
 
         # update train_num_rays
         if self.config.model.dynamic_ray_sampling:
+            # keep ~train_num_samples points per batch: scale ray count inversely to the
+            # mean samples-per-ray this step, then EMA-smooth it (0.9 old + 0.1 new), capped.
             train_num_rays = int(self.train_num_rays * (self.train_num_samples / (render_out['num_samples'].sum().item()+1)))
             self.train_num_rays = min(int(self.train_num_rays * 0.9 + train_num_rays * 0.1), self.config.model.max_train_num_rays)
 
@@ -157,6 +159,7 @@ class MvscpsSystem(pl.LightningModule, SaverMixin):
         self.log('train/loss_eikonal', round(loss_eikonal.item(), 4), prog_bar=True)
         loss += loss_eikonal * self.schedule_value(self.config.system.loss.lambda_eikonal)
 
+        # clamp away from 0/1 so binary_cross_entropy's log() stays finite
         opacity = torch.clamp(render_out['rays_opacity'].squeeze(-1), 1.e-3, 1.- 1.e-3)
         loss_mask = binary_cross_entropy(opacity, batch['rays_fg_mask'].float())
         self.log('train/loss_mask', round(loss_mask.item(), 4), prog_bar=True)
@@ -187,7 +190,7 @@ class MvscpsSystem(pl.LightningModule, SaverMixin):
         # if dataset has gt light directions, evaluate the light directions
         if self.dataset.light_dirs_GT is not None:
             light_est = F.normalize(self.model.lighting.light_dir[self.model.lighting.train_light_indices], p=2, dim=-1).detach().cpu().numpy()
-            light_est[..., [1,2]] = -light_est[..., [1,2]]
+            light_est[..., [1,2]] = -light_est[..., [1,2]]  # OpenCV (model) -> OpenGL (GT light file)
             light_gt = self.dataset.light_dirs_GT[self.model.lighting.train_light_indices]
 
             # compute the angular error between the estimated light direction and the ground truth light direction in degrees
@@ -219,7 +222,9 @@ class MvscpsSystem(pl.LightningModule, SaverMixin):
         Returns (normal_map_est, normal_map_gt_or_None, mae_normal_or_None)."""
         rays_normal_dir_camera_space = out['rays_normal_dir_world_space'].to(batch["R_w2c"]) @ batch['R_w2c'].T  # (N_rays, 3)
         rays_normal_dir_camera_space = F.normalize(rays_normal_dir_camera_space, p=2, dim=-1)
-        rays_normal_dir_camera_space[..., [1, 2]] = -rays_normal_dir_camera_space[..., [1, 2]]  # opencv to opengl conver
+        # flip Y,Z: the model works in OpenCV camera convention, GT normal maps are
+        # stored in OpenGL convention -- align the estimate to GT before comparing.
+        rays_normal_dir_camera_space[..., [1, 2]] = -rays_normal_dir_camera_space[..., [1, 2]]
 
         normal_map_est_camera_space = rays_to_image(rays_normal_dir_camera_space, fg_mask)
 
@@ -227,7 +232,7 @@ class MvscpsSystem(pl.LightningModule, SaverMixin):
         if self.dataset.has_gt_normal:
             normal_map_gt_camera_space = batch['image_normal_camera_space']
             normal_gt_norm = torch.linalg.norm(normal_map_gt_camera_space, dim=-1)
-            normal_gt_valid_mask = normal_gt_norm > 0.9
+            normal_gt_valid_mask = normal_gt_norm > 0.9  # GT normals are unit-length; <0.9 means missing/invalid pixels
 
             mae_normal, _normal_error_map = self.criterions['angular_error'](normal_map_est_camera_space, normal_map_gt_camera_space, valid_mask=normal_gt_valid_mask)
         return normal_map_est_camera_space, normal_map_gt_camera_space, mae_normal
@@ -301,7 +306,7 @@ class MvscpsSystem(pl.LightningModule, SaverMixin):
 
         # save the light directions and intensity
         light_dir_est = self.model.lighting.light_dir[self.model.lighting.train_light_indices].detach().cpu().numpy()
-        light_dir_est[..., [1, 2]] = -light_dir_est[..., [1, 2]]
+        light_dir_est[..., [1, 2]] = -light_dir_est[..., [1, 2]]  # OpenCV (model) -> OpenGL (GT light file)
         light_dir_est = light_dir_est / np.linalg.norm(light_dir_est, axis=-1, keepdims=True)
         light_intensity = self.model.lighting.intensity[self.model.lighting.train_light_indices].detach().cpu().numpy()
         light_intensity_normalized = light_intensity / light_intensity.max()
@@ -420,7 +425,7 @@ class MvscpsSystem(pl.LightningModule, SaverMixin):
         # evaluate light direction
         light_dir_est = F.normalize(self.model.lighting.light_dir[self.model.lighting.train_light_indices], p=2,
                                 dim=-1).detach().cpu().numpy()
-        light_dir_est[..., [1, 2]] = -light_dir_est[..., [1, 2]]  # opencv to opengl convert
+        light_dir_est[..., [1, 2]] = -light_dir_est[..., [1, 2]]  # OpenCV (model) -> OpenGL (GT light file)
         if self.dataset.light_dirs_GT is not None:
             light_dir_gt = self.dataset.light_dirs_GT[self.model.lighting.train_light_indices]
             light_mae = self.criterions['angular_error'](light_dir_est.reshape(-1, 3), light_dir_gt.reshape(-1, 3))[0]
