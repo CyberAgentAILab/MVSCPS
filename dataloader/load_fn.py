@@ -36,11 +36,17 @@ def load_img_a7r5(img_fpath, img_downscale=1):
         img = raw.postprocess(**raw_params)
         img = img[:6376, :9600]  # crop the black border
         img = img[20:-20, 33:-63]  # align the image to the jpg image, which is used for the camera calibration and mask segmentation
+        # Downsample right after cropping, while the frame is still uint16, instead of
+        # widening the full-resolution frame to float32 first. This keeps the transient
+        # per-image buffer ~3x smaller (the full-res float32 copy was ~0.72 GB), which is
+        # the dominant RAM cost when many views are preloaded in parallel. cv2.resize
+        # accepts the non-contiguous cropped view directly; any internal copy it makes
+        # is of the uint16 frame, never the full-res float32 we now avoid.
+        if img_downscale != 1:
+            target_size = (int(img.shape[1] / img_downscale), int(img.shape[0] / img_downscale))
+            img = cv2.resize(img, dsize=target_size, interpolation=cv2.INTER_CUBIC)
         img = img.astype(np.float32) / 65535.
 
-    if img_downscale != 1:
-        target_size = (int(img.shape[1] / img_downscale), int(img.shape[0] / img_downscale))
-        img = cv2.resize(img, dsize=target_size, interpolation=cv2.INTER_CUBIC)
     return img
 
 
