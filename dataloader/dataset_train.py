@@ -40,6 +40,13 @@ class DiligentTrainDataset(IterableDataset):
         self.has_mask = True
 
         # load images and masks
+        # Fill preallocated arrays as results arrive (executor.map preserves input
+        # order) rather than building a full Python list and then np.stack-ing it.
+        # np.stack holds BOTH the list and the stacked copy at once (~2x the image
+        # bytes -- ~26 GB -> ~52 GB for 144 A7R5 views), which OOM-killed the pod.
+        n_views = len(self.view_light_indices)
+        self.images_train = None
+        self.fg_masks_train = None
         with ThreadPoolExecutor(max_workers=io_worker_count(64)) as executor:
             def load_img_and_mask(view_light_index):
                 view_idx = parse_view_idx(view_light_index)
@@ -50,12 +57,15 @@ class DiligentTrainDataset(IterableDataset):
 
             print("Loading images and masks...")
             tic = time.time()
-            images_train_list, fg_masks_train_list = zip(*list(executor.map(load_img_and_mask, self.view_light_indices)))
+            for i, (img, mask) in enumerate(executor.map(load_img_and_mask, self.view_light_indices)):
+                if self.images_train is None:
+                    self.images_train = np.empty((n_views, *img.shape), dtype=img.dtype)   # (N, H, W, 3)
+                    self.fg_masks_train = np.empty((n_views, *mask.shape), dtype=mask.dtype)  # (N, H, W)
+                self.images_train[i] = img
+                self.fg_masks_train[i] = mask
             toc = time.time()
             print("Loading images and masks done.")
             print(f"Time for loading images and masks: {toc - tic:.2f} s")
-        self.images_train = np.stack(images_train_list, 0)  # (N, H, W, 3)
-        self.fg_masks_train = np.stack(fg_masks_train_list, 0)  # (N, H, W)
 
         # load camera parameters
         with ThreadPoolExecutor(max_workers=io_worker_count(64)) as executor:
