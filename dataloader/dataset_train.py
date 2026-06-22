@@ -8,7 +8,7 @@ from icecream import ic
 from torch.utils.data import IterableDataset
 
 from core.registry import REG
-from dataloader.utils import parse_light_idx, parse_view_idx
+from dataloader.utils import io_worker_count, parse_light_idx, parse_view_idx
 
 
 @REG.register("dataset", name='dataset_train')
@@ -40,7 +40,7 @@ class DiligentTrainDataset(IterableDataset):
         self.has_mask = True
 
         # load images and masks
-        with ThreadPoolExecutor(max_workers=min(64, os.cpu_count())) as executor:
+        with ThreadPoolExecutor(max_workers=io_worker_count(64)) as executor:
             def load_img_and_mask(view_light_index):
                 view_idx = parse_view_idx(view_light_index)
                 img_fpath = os.path.join(cfg.data_dir, cfg.img_dirname, f'{view_light_index}.{cfg.img_ext}')
@@ -58,7 +58,7 @@ class DiligentTrainDataset(IterableDataset):
         self.fg_masks_train = np.stack(fg_masks_train_list, 0)  # (N, H, W)
 
         # load camera parameters
-        with ThreadPoolExecutor(max_workers=min(64, os.cpu_count())) as executor:
+        with ThreadPoolExecutor(max_workers=io_worker_count(64)) as executor:
             C2W_train_list, K_train_list = zip(*list(executor.map(
                 partial(self.camera_select_fn, cams=self.cams, img_downscale=cfg.train.img_downscale),
                 self.view_light_indices)))
@@ -101,7 +101,7 @@ class DiligentTrainDataset(IterableDataset):
             self.all_image_to_unique_view_list_idx = np.array(
                 [self.unique_view_idx_to_unique_view_list_idx[v] for v in self.all_image_to_unique_view_mapping])
 
-            with ThreadPoolExecutor(max_workers=min(64, os.cpu_count())) as executor:
+            with ThreadPoolExecutor(max_workers=io_worker_count(64)) as executor:
                 def load_normal(view_light_index):
                     view_idx = parse_view_idx(view_light_index)
                     normal_fpath = os.path.join(cfg.data_dir, cfg.normal_dirname, f'V{view_idx:02d}.{cfg.normal_ext}')

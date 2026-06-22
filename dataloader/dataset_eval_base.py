@@ -6,7 +6,7 @@ import numpy as np
 from torch.utils.data import Dataset
 
 from core.registry import REG
-from dataloader.utils import parse_light_idx, parse_view_idx
+from dataloader.utils import io_worker_count, parse_light_idx, parse_view_idx
 
 
 class DiligentEvalDataset(Dataset):
@@ -65,7 +65,7 @@ class DiligentEvalDataset(Dataset):
         self.normal_dirname = cfg.normal_dirname
 
         # load images and masks
-        with ThreadPoolExecutor(max_workers=min(64, os.cpu_count())) as executor:
+        with ThreadPoolExecutor(max_workers=io_worker_count(64)) as executor:
             def load_img_and_mask(view_light_index):
                 view_idx = parse_view_idx(view_light_index)
                 img_file = os.path.join(cfg.data_dir, cfg.img_dirname, f'{view_light_index}.{cfg.img_ext}')
@@ -76,14 +76,14 @@ class DiligentEvalDataset(Dataset):
         # load normal maps, evaluation purpose only
         if self.has_gt_normal:
             self.normal_load_fn = REG.get("fn", cfg.normal_load_fn)
-            with ThreadPoolExecutor(max_workers=min(64, os.cpu_count())) as executor:
+            with ThreadPoolExecutor(max_workers=io_worker_count(64)) as executor:
                 def load_normal(view_light_index):
                     view_idx = parse_view_idx(view_light_index)
                     normal_path = os.path.join(self.config.data_dir, self.normal_dirname, f'V{view_idx:02d}.exr')
                     return normal_path
                 self.normal_maps = list(executor.map(load_normal, self.view_light_indices))
 
-        with ThreadPoolExecutor(max_workers=min(64, os.cpu_count())) as executor:
+        with ThreadPoolExecutor(max_workers=io_worker_count(64)) as executor:
             C2W_list, K_list = zip(*list(executor.map(
                 partial(self.camera_select_fn, cams=self.cams, img_downscale=self.img_downscale), self.view_light_indices)))
 
@@ -115,7 +115,7 @@ class DiligentEvalDataset(Dataset):
 
         # test renders the mesh at img_mesh_downscale; val reuses img_downscale.
         mesh_downscale = stage_cfg.get('img_mesh_downscale', self.img_downscale)
-        with ThreadPoolExecutor(max_workers=min(64, os.cpu_count())) as executor:
+        with ThreadPoolExecutor(max_workers=io_worker_count(64)) as executor:
             C2W_mesh, K_mesh = zip(*list(executor.map(partial(self.camera_select_fn, cams=self.cams,
                     img_downscale=mesh_downscale), self.unique_train_view_light_indices)))
 

@@ -1,8 +1,34 @@
 import math
+import os
 
 import numpy as np
 import open3d as o3d
 import torch
+
+
+def io_worker_count(cap=64):
+    """Thread-pool size for image preloading, respecting the container quota.
+
+    In K8s pods ``os.cpu_count()`` reports the *node's* cores (e.g. 256), not the
+    pod's CPU limit (e.g. 12). Sizing decode pools from it runs up to 64 parallel
+    full-res rawpy decodes and OOM-kills the pod during dataset preload. Read the
+    cgroup CPU quota instead and fall back to ``os.cpu_count()`` off-cgroup.
+    """
+    try:
+        with open("/sys/fs/cgroup/cpu.max") as f:  # cgroup v2
+            quota, period = f.read().split()
+            if quota != "max":
+                return max(1, min(cap, int(quota) // int(period)))
+    except OSError:
+        pass
+    try:  # cgroup v1
+        quota = int(open("/sys/fs/cgroup/cpu/cpu.cfs_quota_us").read())
+        period = int(open("/sys/fs/cgroup/cpu/cpu.cfs_period_us").read())
+        if quota > 0:
+            return max(1, min(cap, quota // period))
+    except OSError:
+        pass
+    return min(cap, os.cpu_count() or 1)
 
 
 def parse_view_idx(view_light_index):

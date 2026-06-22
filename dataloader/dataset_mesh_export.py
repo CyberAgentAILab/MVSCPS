@@ -6,7 +6,7 @@ import numpy as np
 from torch.utils.data import Dataset
 
 from core.registry import REG
-from dataloader.utils import parse_light_idx, parse_view_idx
+from dataloader.utils import io_worker_count, parse_light_idx, parse_view_idx
 
 
 @REG.register("dataset", name='dataset_mesh_export')
@@ -41,7 +41,7 @@ class MeshExportDataset(Dataset):
                     self.unique_view_light_indices.append(j)
                     break
 
-        with ThreadPoolExecutor(max_workers=min(64, os.cpu_count())) as executor:
+        with ThreadPoolExecutor(max_workers=io_worker_count(64)) as executor:
             C2W_mesh, K_mesh = zip(*list(executor.map(partial(self.camera_select_fn, cams=self.cams,
                     img_downscale=cfg_mesh.img_downscale), self.unique_view_light_indices)))
 
